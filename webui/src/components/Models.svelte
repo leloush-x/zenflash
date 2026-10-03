@@ -17,15 +17,14 @@
 
   onMount(load);
 
+  const free = $derived((data?.models ?? []).filter((m: any) => m.anonymous_eligibility?.allowed));
   const visible = $derived(
-    (data?.models ?? []).filter((m: any) =>
-      !modelFilter.trim() || m.model.toLowerCase().includes(modelFilter.trim().toLowerCase()),
-    ),
+    free.filter((m: any) => !modelFilter.trim() || m.model.toLowerCase().includes(modelFilter.trim().toLowerCase())),
   );
 </script>
 
 <div class="fade-up flex flex-wrap items-center gap-2">
-  <div class="eyebrow !mb-0">routable models · {visible.length} / {(data?.models ?? []).length}</div>
+  <div class="eyebrow !mb-0">free models · {visible.length} / {(data?.models ?? []).length}</div>
   <span class="grow"></span>
   <input class="w-full sm:w-56" placeholder="filter models…" bind:value={modelFilter} />
   <button class="btn-ghost" onclick={load}>refresh</button>

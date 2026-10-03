@@ -16,13 +16,14 @@
   async function load() {
     try {
       data = await api("/api/debug/models");
-      if (!model && data?.models?.length) model = data.models[0].model;
+      const first = (data?.models ?? []).find((m: any) => m.anonymous_eligibility?.allowed);
+      if (!model && first) model = first.model;
     } catch {}
   }
 
   onMount(load);
 
-  const models = $derived(data?.models ?? []);
+  const models = $derived((data?.models ?? []).filter((m: any) => m.anonymous_eligibility?.allowed));
   const keys = $derived(data?.keys ?? { zen: [], go: [] });
   const keyOptions = $derived(keys[keyTier] ?? []);
 
