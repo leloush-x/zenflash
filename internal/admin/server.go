@@ -286,7 +286,7 @@ func (a *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 			after = event.Sequence
 			flusher.Flush()
 		case <-keepAlive.C:
-			if cookie == nil || !a.sessionTokenValid(cookie.Value) {
+			if !a.openAdmin() && (cookie == nil || !a.sessionTokenValid(cookie.Value)) {
 				return
 			}
 			_, _ = io.WriteString(w, ": keepalive\n\n")
