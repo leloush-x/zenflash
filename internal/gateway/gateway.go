@@ -78,6 +78,10 @@ func (g *Gateway) Handler() http.Handler {
 
 func (g *Gateway) authenticate(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if len(g.cfg.ServerKeys) == 0 {
+			next(w, r)
+			return
+		}
 		candidates := []string{strings.TrimSpace(r.Header.Get("x-api-key"))}
 		if auth := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(auth), "bearer ") {
 			candidates = append(candidates, strings.TrimSpace(auth[7:]))

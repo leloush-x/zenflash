@@ -115,11 +115,9 @@ func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := a.manager.Config()
-	if len(cfg.ServerKeys) == 0 {
-		writeAdminError(w, http.StatusServiceUnavailable, "debug_unavailable", "no local server key is configured")
-		return
+	if len(cfg.ServerKeys) > 0 {
+		request.Header.Set("Authorization", "Bearer "+cfg.ServerKeys[0])
 	}
-	request.Header.Set("Authorization", "Bearer "+cfg.ServerKeys[0])
 	if selectedKey != nil {
 		request = request.WithContext(gateway.WithDebugKeyOverride(request.Context(), gateway.DebugKeyOverride{Tier: selectedKey.Tier, KeyID: selectedKey.ID}))
 	}

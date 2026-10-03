@@ -1,8 +1,6 @@
 {
   "listen": "127.0.0.1:8080",
-  "server_keys": [
-    "free"
-  ],
+  "server_keys": [],
   "zen_keys": [],
   "go_keys": [
     "free"
@@ -42,7 +40,7 @@
     "enabled": true,
     "listen": "127.0.0.1:8081",
     "username": "admin",
-    "password": "free",
+    "password": "",
     "session_ttl_minutes": 720
   },
   "prefer": "go",

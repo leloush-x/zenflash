@@ -206,6 +206,12 @@ func (a *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
+	if a.openAdmin() {
+		cfg := a.manager.Config()
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"server_keys": cfg.ServerKeys, "zen_keys": cfg.ZenKeys, "go_keys": cfg.GoKeys, "proxies": cfg.Proxies})
+		return
+	}
 	var input struct {
 		Password string `json:"password"`
 	}

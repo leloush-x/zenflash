@@ -21,6 +21,20 @@ import (
 
 const adminCookieName = "zenflash-llm_session"
 
+// openAdmin reports whether the admin surface runs without credentials —
+// i.e. no webui.password/password_hash has been configured. In that mode
+// sessions are deterministic, CSRF tokens are a constant, and the browser
+// never sees the login form.
+func (a *Server) openAdmin() bool {
+	cfg := a.manager.Config()
+	return cfg.WebUI.Password == "" && cfg.WebUI.PasswordHash == ""
+}
+
+// openSession returns the deterministic session used in open admin mode.
+func (a *Server) openSession() adminSession {
+	return adminSession{Username: "admin", AuthVersion: "", CSRF: "open", Expires: time.Now().Add(365 * 24 * time.Hour)}
+}
+
 type adminSession struct {
 	Username    string
 	AuthVersion string
@@ -34,6 +48,11 @@ type loginWindow struct {
 }
 
 func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if a.openAdmin() {
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"username": "admin", "csrf_token": "open", "authenticated": true})
+		return
+	}
 	client := clientIP(r)
 	if !a.allowLogin(client) {
 		writeAdminError(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts; try again later")
@@ -84,6 +103,9 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (a *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r)
+	if a.openAdmin() {
+		session = a.openSession()
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": session.Username, "csrf_token": session.CSRF, "expires_at": session.Expires.UTC()})
 }
@@ -104,6 +126,12 @@ type sessionContextKey struct{}
 
 func (a *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.openAdmin() {
+			session := a.openSession()
+			r = r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, session))
+			next.ServeHTTP(w, r)
+			return
+		}
 		cookie, err := r.Cookie(adminCookieName)
 		if err != nil || cookie.Value == "" {
 			writeAdminError(w, http.StatusUnauthorized, "authentication_required", "login required")
@@ -139,6 +167,9 @@ func sessionFromContext(r *http.Request) (adminSession, bool) {
 func (a *Server) csrf(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session, ok := sessionFromContext(r)
+		if a.openAdmin() {
+			session, ok = a.openSession(), true
+		}
 		if !ok || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(session.CSRF)) != 1 {
 			writeAdminError(w, http.StatusForbidden, "csrf_failed", "invalid CSRF token")
 			return

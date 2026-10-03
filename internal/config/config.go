@@ -171,9 +171,8 @@ func Normalize(path string, cfg Config) (Config, error) {
 			return Config{}, fmt.Errorf("%s must be an http or https URL", name)
 		}
 	}
-	if len(cfg.ServerKeys) == 0 {
-		return Config{}, errors.New("server_keys must contain at least one local key")
-	}
+	// server_keys may be empty: that disables client auth entirely (public,
+	// no-key mode) instead of requiring at least one.
 	if !cfg.Anonymous && len(cfg.ZenKeys) == 0 && len(cfg.GoKeys) == 0 {
 		return Config{}, errors.New("zen_keys or go_keys must contain at least one upstream key unless anonymous is enabled")
 	}
@@ -208,11 +207,9 @@ func Normalize(path string, cfg Config) (Config, error) {
 			return Config{}, errors.New("webui.listen must not be empty when webui is enabled")
 		}
 		if cfg.WebUI.Username == "" {
-			return Config{}, errors.New("webui.username must not be empty when webui is enabled")
+			cfg.WebUI.Username = "admin"
 		}
-		if cfg.WebUI.Password == "" && cfg.WebUI.PasswordHash == "" {
-			return Config{}, errors.New("webui.password is required for first-time setup")
-		}
+		// webui.password is optional: when empty the admin UI/API is open.
 		if cfg.WebUI.SessionTTLMinutes < 5 || cfg.WebUI.SessionTTLMinutes > 10080 {
 			return Config{}, errors.New("webui.session_ttl_minutes must be between 5 and 10080")
 		}
