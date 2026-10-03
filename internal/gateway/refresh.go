@@ -290,7 +290,15 @@ type effortIndex struct {
 type effortModelInfo struct {
 	Efforts []string `json:"efforts"`
 	Error   string   `json:"error,omitempty"`
+	// ProbedAt records when this row was last probed so we can avoid
+	// re-hammering upstream, while still retrying errored rows after a
+	// cooldown instead of caching them forever.
+	ProbedAt time.Time `json:"probed_at,omitempty"`
 }
+
+// errorRetryAfter is how long an errored effort row stays in the cache before
+// the next refresh re-probes it.
+const errorRetryAfter = 6 * time.Hour
 
 func (g *Gateway) probeModelEfforts(ctx context.Context) {
 	if !g.cfg.Anonymous || g.cfg.Upstream.Zen == "" {
@@ -310,7 +318,10 @@ func (g *Gateway) probeModelEfforts(ctx context.Context) {
 		if !g.catalog.IsFreeModel(id) {
 			continue
 		}
-		if info, ok := existing.Models[id]; ok && len(info.Efforts) > 0 {
+		if info, ok := existing.Models[id]; ok && len(info.Efforts) > 0 && info.Error == "" {
+			continue
+		}
+		if info, ok := existing.Models[id]; ok && info.Error != "" && time.Since(info.ProbedAt) < errorRetryAfter {
 			continue
 		}
 		ids = append(ids, id)
@@ -336,6 +347,7 @@ func (g *Gateway) probeModelEfforts(ctx context.Context) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			info := probeModelEffort(ctx, client, g.cfg.Upstream.Zen, id)
+			info.ProbedAt = time.Now().UTC()
 			mu.Lock()
 			existing.Models[id] = info
 			mu.Unlock()
