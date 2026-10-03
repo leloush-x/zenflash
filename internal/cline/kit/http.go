@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -14,7 +15,19 @@ import (
 
 var ExecCommand = exec.Command
 
+var clineProxyURL = func() *url.URL {
+	raw := strings.TrimSpace(os.Getenv("CLINE_HTTP_PROXY"))
+	if raw == "" {
+		return nil
+	}
+	if u, err := url.Parse(raw); err == nil {
+		return u
+	}
+	return nil
+}()
+
 var HTTPTransport = &http.Transport{
+	Proxy:               func(_ *http.Request) (*url.URL, error) { return clineProxyURL, nil },
 	MaxIdleConns:        100,
 	MaxIdleConnsPerHost: 10,
 	IdleConnTimeout:     90 * time.Second,
