@@ -65,6 +65,7 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("POST /api/cline/accounts/delete", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountDelete))))
 	mux.Handle("POST /api/cline/accounts/add", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountAdd))))
 	mux.Handle("GET /api/catalog", a.authenticate(http.HandlerFunc(a.handleCatalog)))
+	a.aliasRouting(mux)
 	mux.HandleFunc("/", a.serveSPA())
 	return a.securityHeaders(telemetry.Recover(a.logger, mux))
 }
