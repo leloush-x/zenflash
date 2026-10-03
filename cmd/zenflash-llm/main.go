@@ -64,17 +64,26 @@ func main() {
 	redactor.Replace(cfg)
 	logger := telemetry.NewStructuredLogger(level, hub, redactor)
 	monitor := telemetry.NewMonitor()
+	clineURL := ""
+	if *clinePort != 0 {
+		clineURL = fmt.Sprintf("http://%s:%d", *clineHost, *clinePort)
+		go func() {
+			logger.Info("embedded Cline proxy listening", "component", "cline", "event", "server_started", "host", *clineHost, "port", *clinePort)
+			if err := app.StartProxy(*clineHost, *clinePort); err != nil {
+				logger.Error("embedded Cline proxy stopped unexpectedly", "component", "cline", "event", "server_failed", "error", err)
+			}
+		}()
+		// The first catalog refresh races the Cline proxy startup; give it a
+		// brief head start so the go tier actually enumerates on cold boots.
+		waitForHTTP(ctx, clineURL+"/health", 10*time.Second, logger)
+	}
+
 	manager, err := gateway.NewRuntimeManager(ctx, *configPath, cfg, logger, monitor, hub, redactor, level)
 	if err != nil {
 		logger.Error("failed to initialize runtime", "component", "runtime", "event", "runtime_initialization_failed", "error", err)
 		os.Exit(1)
 	}
 	defer manager.Shutdown()
-
-	clineURL := ""
-	if *clinePort != 0 {
-		clineURL = fmt.Sprintf("http://%s:%d", *clineHost, *clinePort)
-	}
 
 	servers := []*http.Server{}
 	var apiHandler http.Handler = manager.Handler()
@@ -101,15 +110,6 @@ func main() {
 	servers = append(servers, apiServer)
 	go serveHTTP(cancel, logger, apiServer, "api")
 
-	if *clinePort != 0 {
-		go func() {
-			logger.Info("embedded Cline proxy listening", "component", "cline", "event", "server_started", "host", *clineHost, "port", *clinePort)
-			if err := app.StartProxy(*clineHost, *clinePort); err != nil {
-				logger.Error("embedded Cline proxy stopped unexpectedly", "component", "cline", "event", "server_failed", "error", err)
-			}
-		}()
-	}
-
 	<-ctx.Done()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
@@ -125,5 +125,32 @@ func serveHTTP(cancel context.CancelFunc, logger *slog.Logger, server *http.Serv
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server stopped unexpectedly", "component", component, "event", "server_failed", "address", server.Addr, "error", err)
 		cancel()
+	}
+}
+
+// waitForHTTP polls url until it answers with any HTTP status or the timeout
+// elapses. It is only used to order startup work, so a slow or absent target
+// must not block boot: the gateway still comes up after timeout.
+func waitForHTTP(ctx context.Context, url string, timeout time.Duration, logger *slog.Logger) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.Now().Add(timeout)
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err == nil {
+			if resp, err := client.Do(req); err == nil {
+				_ = resp.Body.Close()
+				logger.Info("upstream ready", "component", "cline", "event", "health_ready", "url", url)
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			logger.Warn("upstream not ready before timeout; the go tier will retry in the next refresh window", "component", "cline", "event", "health_wait_timeout", "url", url)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 }
