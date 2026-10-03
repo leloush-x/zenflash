@@ -230,10 +230,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
+          # Every artifact of a tagged checkout is published as a proper,
+          # marked-latest release — dev builds are no longer downgraded to
+          # prerelease.
           release_type=()
-          if [[ "$RELEASE_TAG" == *-* ]]; then
-            release_type+=(--prerelease)
-          fi
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-files/* --clobber --repo "$GITHUB_REPOSITORY"
           else
