@@ -15,7 +15,6 @@ import (
 var ExecCommand = exec.Command
 
 var HTTPTransport = &http.Transport{
-	Proxy:               http.ProxyFromEnvironment, // honors HTTP_PROXY/HTTPS_PROXY for deploy egress allowlists
 	MaxIdleConns:        100,
 	MaxIdleConnsPerHost: 10,
 	IdleConnTimeout:     90 * time.Second,
