@@ -65,6 +65,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Build dashboard
+        run: cd webui && npm ci && npm run build
+
       - name: Vet
         run: go vet ./...
 

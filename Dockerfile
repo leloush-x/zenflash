@@ -1,13 +1,6 @@
-FROM --platform=$BUILDPLATFORM node:22-trixie AS webui
-
-WORKDIR /src/webui
-
-COPY webui/package.json webui/package-lock.json ./
-RUN npm ci --no-audit --no-fund
-
-COPY webui/ ./
-RUN npm run build
-
+# The dashboard is prebuilt and committed at webui/dist (rebuild with
+# `cd webui && npm ci && npm run build` after UI changes and commit it),
+# so the runtime image needs no Node toolchain.
 FROM --platform=$BUILDPLATFORM golang:1.25-trixie AS builder
 
 ARG TARGETOS
@@ -20,7 +13,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-COPY --from=webui /src/webui/dist ./webui/dist
 
 RUN CGO_ENABLED=0 \
     GOOS="${TARGETOS:-linux}" \

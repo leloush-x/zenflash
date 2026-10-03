@@ -376,8 +376,7 @@ Mutating routes require the `X-CSRF-Token` returned at login.
 The dashboard itself is a Svelte single-page app embedded via `go:embed`. It
 live-updates through `GET /api/events` (SSE, two-second `tick` snapshots of
 metrics/resources) and falls back to the same management API for everything
-else. Build assets: `cd webui && npm ci && npm run build` (the Dockerfile does
-this for you); the resulting `webui/dist/` is embedded into the binary.
+else. Build assets: `cd webui && npm ci && npm run build`. The compiled `webui/dist/` is committed and embedded via `go:embed`, so `go build` and `docker build` work without Node.
 
 ## Health
 

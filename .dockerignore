@@ -8,5 +8,6 @@
 !config.example.json
 !docker-entrypoint.sh
 !Dockerfile
-!webui/
-!webui/**
+!webui/embed.go
+!webui/dist/
+!webui/dist/**
