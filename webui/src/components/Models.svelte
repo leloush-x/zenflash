@@ -3,6 +3,7 @@
   import { api } from "../lib";
 
   let data = $state<any>(null);
+  let catalog = $state<any>(null);
   let modelFilter = $state("");
   let failed = $state(false);
 
@@ -10,10 +11,13 @@
     failed = false;
     try {
       data = await api("/api/debug/models");
+      catalog = await api("/api/catalog").catch(() => null);
     } catch {
       failed = true;
     }
   }
+
+  const catById = $derived(new Map<string, any>((catalog?.data ?? []).map((m: any) => [m.id, m])));
 
   onMount(load);
 
@@ -45,6 +49,7 @@
 {:else}
   <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
     {#each visible as m (m.model)}
+      {@const c = catById.get(m.model)}
       <div class="card flex flex-col">
         <div class="flex items-start gap-2">
           <div class="min-w-0 grow">
@@ -58,10 +63,18 @@
             </div>
           </div>
           <div class="flex shrink-0 flex-col items-end gap-1.5 text-right text-[11px] leading-tight text-[color:var(--color-faint)]">
-            <div class="tnum">protocol: {m.protocol_source ?? "?"}</div>
-            <div class="tnum">tier keys: {(m.key_tiers ?? []).join("/") || "–"}</div>
+            <div class="tnum">ctx {c?.context_window ? Math.round(c.context_window / 1000) + "k" : "–"}</div>
+            <div class="tnum">out {c?.max_output ? Math.round(c.max_output / 1000) + "k" : "–"}</div>
           </div>
         </div>
+
+        {#if c?.metadata?.reasoning_efforts?.length}
+          <div class="mt-2 flex flex-wrap gap-1">
+            {#each c.metadata.reasoning_efforts as lv (lv)}
+              <span class="mono rounded-full border border-[color:var(--color-edge)] px-2 py-0.5 text-[10px] text-[color:var(--color-dim)]">{lv}</span>
+            {/each}
+          </div>
+        {/if}
 
         <div class="mt-3 flex items-center gap-1.5 text-[11px]">
           <span class="pill" class:good={m.anonymous_eligibility?.allowed}>

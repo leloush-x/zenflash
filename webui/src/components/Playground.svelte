@@ -3,6 +3,7 @@
   import { api, post, ms, num, replyText, replyMeta } from "../lib";
 
   let data = $state<any>(null);
+  let catalog = $state<any>(null);
   let protocol = $state("chat");
   let model = $state("");
   let effort = $state("");
@@ -16,6 +17,7 @@
   async function load() {
     try {
       data = await api("/api/debug/models");
+      catalog = await api("/api/catalog").catch(() => null);
       const first = (data?.models ?? []).find((m: any) => m.anonymous_eligibility?.allowed);
       if (!model && first) model = first.model;
     } catch {}
@@ -25,6 +27,8 @@
 
   const models = $derived((data?.models ?? []).filter((m: any) => m.anonymous_eligibility?.allowed));
   const keys = $derived(data?.keys ?? { zen: [], go: [] });
+  const catById = $derived(new Map<string, any>((catalog?.data ?? []).map((m: any) => [m.id, m])));
+  const selectedCat = $derived(catById.get(model));
   const keyOptions = $derived(keys[keyTier] ?? []);
 
   async function run() {
@@ -93,6 +97,18 @@
       </button>
     </div>
   </div>
+
+  {#if selectedCat}
+    <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-[color:var(--color-faint)]">
+      <span class="pill">{selectedCat.provider ?? "–"}</span>
+      <span class="pill">ctx <b class="mono ml-1">{num(selectedCat.context_window)}</b></span>
+      <span class="pill">out <b class="mono ml-1">{num(selectedCat.max_output)}</b></span>
+      {#if selectedCat.metadata?.reasoning}<span class="pill good">reasoning</span>{/if}
+      {#each selectedCat.metadata?.reasoning_efforts ?? [] as lv (lv)}
+        <span class="mono rounded-full border border-[color:var(--color-edge)] px-2 py-0.5 text-[10px]">{lv}</span>
+      {/each}
+    </div>
+  {/if}
 
   <p class="mt-2 text-[11px] text-[color:var(--color-faint)]">
     single attempt via the gateway (12/min per IP), no client rotation — use <code>/v1/*</code> directly for streaming.

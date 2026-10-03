@@ -124,7 +124,7 @@ export function replyMeta(out: any): { label: string; value: string }[] {
   const items: { label: string; value: string }[] = [];
   if (out.http_status) items.push({ label: "status", value: String(out.http_status) });
   if (out.duration_ms !== undefined) items.push({ label: "time", value: ms(out.duration_ms) });
-  if (out.route?.tier) items.push({ label: "tier", value: out.route.tier });
+  if (out.route?.tier) items.push({ label: "source", value: out.route.tier === "zen" ? "opencode" : out.route.tier === "go" ? "cline" : out.route.tier });
   if (out.route?.channel) items.push({ label: "channel", value: out.route.channel });
   if (out.key_test) items.push({ label: "key", value: out.key_test });
   const u = out.response?.usage;

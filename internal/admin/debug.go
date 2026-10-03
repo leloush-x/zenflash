@@ -268,3 +268,25 @@ func sensitiveDebugKey(key string) bool {
 	}
 	return false
 }
+
+// handleCatalog returns the same live /v1/models listing the public API
+// exposes (context window, max output, reasoning efforts, provider) by
+// replaying the request internally with the first configured server key.
+func (a *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
+	cfg := a.manager.Config()
+	if len(cfg.ServerKeys) == 0 {
+		writeAdminError(w, http.StatusServiceUnavailable, "catalog_unavailable", "no local server key is configured")
+		return
+	}
+	request, err := http.NewRequest(http.MethodGet, "http://gateway.local/v1/models", nil)
+	if err != nil {
+		writeAdminError(w, http.StatusInternalServerError, "catalog_failed", err.Error())
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+cfg.ServerKeys[0])
+	recorder := newDebugResponseRecorder()
+	a.manager.Handler().ServeHTTP(recorder, request)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(recorder.status)
+	_, _ = w.Write(recorder.body.Bytes())
+}

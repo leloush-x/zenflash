@@ -13,6 +13,21 @@
   // cline oauth
   let cline = $state<any>(null);
   let clineBusy = $state(false);
+  let accounts = $state<any[]>([]);
+
+  async function loadAccounts() {
+    try {
+      const r = await api<any>("/api/cline/accounts");
+      accounts = r?.data?.accounts ?? r?.accounts ?? [];
+    } catch { accounts = []; }
+  }
+
+  async function removeAccount(id: string) {
+    await post("/api/cline/accounts/delete", { accountId: id });
+    await loadAccounts();
+  }
+
+  onMount(() => { load(); loadAccounts(); });
   let clineTimer: any;
   async function startCline() {
     clineBusy = true;
@@ -40,8 +55,6 @@
   let newUser = $state("");
   let newPw = $state("");
   let acctNote = $state("");
-
-  onMount(load);
 
   async function load() {
     failed = false;
@@ -290,6 +303,18 @@
   <div class="card fade-up" style="--d:260ms">
     <div class="eyebrow">cline account</div>
     <p class="text-[12px] text-[color:var(--color-faint)]">Sign in to your Cline account; the embedded Cline proxy (go tier) will use it for go-key routing.</p>
+    {#if accounts.length}
+      <div class="mt-3 flex flex-col gap-1.5">
+        {#each accounts as a (a.accountId)}
+          <div class="flex items-center gap-2 rounded-lg border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.6)] px-3 py-2 text-[12px]">
+            <span class="min-w-0 grow truncate mono" title={a.email}>{a.email}</span>
+            <span class="pill" class:good={a.status === "active"} class:warn={a.status === "cooldown"} class:bad={a.status === "expired"}>{a.status}</span>
+            <span class="pill faint">today {a.usageCountToday ?? 0} req · {a.tokensToday ?? 0} tok</span>
+            <button class="btn-danger !px-2 !py-0.5 text-[11px]" onclick={() => removeAccount(a.accountId)} title="remove">×</button>
+          </div>
+        {/each}
+      </div>
+    {/if}
     {#if cline?.done}
       <p class="mt-2 text-[12px] good">{cline.success ? `logged in as ${cline.email}` : `login failed: ${cline.error}`}</p>
       <button class="btn-ghost mt-2 w-fit" onclick={startCline}>login again</button>

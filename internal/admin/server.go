@@ -61,6 +61,9 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("GET /api/events", a.authenticate(http.HandlerFunc(a.handleEvents)))
 	mux.Handle("POST /api/cline/oauth/start", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineOAuthStart))))
 	mux.Handle("GET /api/cline/oauth/status", a.authenticate(http.HandlerFunc(a.handleClineOAuthStatus)))
+	mux.Handle("GET /api/cline/accounts", a.authenticate(http.HandlerFunc(a.handleClineAccounts)))
+	mux.Handle("POST /api/cline/accounts/delete", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountDelete))))
+	mux.Handle("GET /api/catalog", a.authenticate(http.HandlerFunc(a.handleCatalog)))
 	mux.HandleFunc("/", a.serveSPA())
 	return a.securityHeaders(telemetry.Recover(a.logger, mux))
 }
