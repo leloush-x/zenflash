@@ -1,6 +1,8 @@
 package app
 
 import (
+	"zenflash-llm/internal/cline/cline"
+	"zenflash-llm/internal/cline/kit"
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -12,8 +14,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"zenflash-llm/internal/cline/cline"
-	"zenflash-llm/internal/cline/kit"
 )
 
 var defaultModel = "deepseek/deepseek-v4-flash"

@@ -343,7 +343,8 @@
     {:else}
       <button class="btn-ghost mt-2 w-fit" onclick={startCline} disabled={clineBusy}>{clineBusy ? "starting…" : "sign in with Cline"}</button>
     {/if}
-  </div>\n    <div class="card fade-up" style="--d:240ms">
+  </div>
+  <div class="card fade-up" style="--d:240ms">
       <div class="eyebrow">account</div>
       <div class="flex flex-col gap-2.5 text-[13px]">
         <input class="w-full text-[12px]" type="password" placeholder="current password" bind:value={curPw} />
