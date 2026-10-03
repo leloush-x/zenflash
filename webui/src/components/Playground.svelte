@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, post, ms, num } from "../lib";
+  import { api, post, ms, num, replyText, replyMeta } from "../lib";
 
   let data = $state<any>(null);
   let protocol = $state("chat");
@@ -114,16 +114,23 @@
     <div class="eyebrow !mb-2">output</div>
     <div class="min-h-32 grow overflow-auto rounded-lg border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.7)] p-3">
       {#if out}
-        {#if out.route}
-          <div class="mb-2 flex flex-wrap gap-1 text-[11px]">
-            <span class="pill" class:good={out.ok} class:bad={!out.ok}>{out.ok ? "ok" : "http " + out.http_status}</span>
-            <span class="pill">{out.route.tier || "–"}</span>
-            <span class="pill">{out.route.channel || "–"}</span>
-            <span class="pill">{ms(out.duration_ms)}</span>
-            {#if out.key_test}<span class="pill" class:good={out.key_test === "usable"} class:bad={out.key_test === "rejected"}>{out.key_test}</span>{/if}
-          </div>
+        <div class="mb-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span class="pill" class:good={out.ok} class:bad={!out.ok}>{out.ok ? "ok" : "http " + out.http_status}</span>
+          {#each replyMeta(out) as m (m.label)}
+            <span class="pill faint"><span class="dim mr-1">{m.label}</span>{m.value}</span>
+          {/each}
+        </div>
+        {#if replyText(out.response)}
+          <div class="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{replyText(out.response)}</div>
+        {:else if out.error}
+          <div class="text-[13px] bad">{out.error}</div>
+        {:else}
+          <div class="text-[13px] dim">no visible reply text</div>
         {/if}
-        <pre class="max-h-96 overflow-auto">{JSON.stringify(out, null, 2)}</pre>
+        <details class="mt-3">
+          <summary class="cursor-pointer text-[11px] text-[color:var(--color-faint)]">raw response</summary>
+          <pre class="mt-1 max-h-80 overflow-auto text-[11px]">{JSON.stringify(out, null, 2)}</pre>
+        </details>
       {:else}
         <div class="empty min-h-24">
           <div class="text-2xl opacity-40">⌁</div>

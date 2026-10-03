@@ -92,3 +92,48 @@ export function withNewSecret(arr: any[], value: string) {
 }
 
 export const EFFORTS = ["", "minimal", "low", "medium", "high", "xhigh", "max", "none"] as const;
+
+/** Extract the assistant reply text from a chat/responses/anthropic response body. */
+export function replyText(resp: any): string {
+  if (resp == null) return "";
+  if (typeof resp === "string") return resp;
+  const chat = resp.choices?.[0]?.message;
+  if (chat) return chat.content ?? chat.reasoning_content ?? "";
+  if (typeof resp.output_text === "string") return resp.output_text;
+  if (Array.isArray(resp.output)) {
+    for (const item of resp.output) {
+      const parts = item?.content;
+      if (Array.isArray(parts)) {
+        const t = parts.map((p: any) => p.text ?? p.output_text ?? "").join("");
+        if (t) return t;
+      }
+    }
+  }
+  if (Array.isArray(resp.content)) {
+    return resp.content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join("");
+  }
+  if (resp.error) {
+    return typeof resp.error === "string" ? resp.error : (resp.error.message ?? JSON.stringify(resp.error));
+  }
+  return "";
+}
+
+/** Pick the small set of useful metrics out of an inference result. */
+export function replyMeta(out: any): { label: string; value: string }[] {
+  if (!out) return [];
+  const items: { label: string; value: string }[] = [];
+  if (out.http_status) items.push({ label: "status", value: String(out.http_status) });
+  if (out.duration_ms !== undefined) items.push({ label: "time", value: ms(out.duration_ms) });
+  if (out.route?.tier) items.push({ label: "tier", value: out.route.tier });
+  if (out.route?.channel) items.push({ label: "channel", value: out.route.channel });
+  if (out.key_test) items.push({ label: "key", value: out.key_test });
+  const u = out.response?.usage;
+  if (u) {
+    const inn = u.prompt_tokens ?? u.input_tokens;
+    const outt = u.completion_tokens ?? u.output_tokens;
+    if (inn !== undefined) items.push({ label: "in", value: num(inn) });
+    if (outt !== undefined) items.push({ label: "out", value: num(outt) });
+  }
+  if (out.request_id) items.push({ label: "req", value: String(out.request_id).slice(0, 8) });
+  return items;
+}
