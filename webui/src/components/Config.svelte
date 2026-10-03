@@ -10,6 +10,31 @@
   let protocols = $state("{}");
   let effortByModel = $state("{}");
 
+  // cline oauth
+  let cline = $state<any>(null);
+  let clineBusy = $state(false);
+  let clineTimer: any;
+  async function startCline() {
+    clineBusy = true;
+    try {
+      const r = await post<any>("/api/cline/oauth/start");
+      const d = r?.data ?? r;
+      if (r?.success && d?.sessionId) {
+        cline = { sessionId: d.sessionId, verificationUri: d.verificationUri, userCode: d.userCode };
+        clineTimer = setInterval(pollCline, 2000);
+      } else note = "cline login start failed: " + (r?.error ?? JSON.stringify(r).slice(0, 100));
+    } catch (e) { note = String(e); }
+    finally { clineBusy = false; }
+  }
+  async function pollCline() {
+    try {
+      const r = await api<any>(`/api/cline/oauth/status?sessionId=${cline.sessionId}`);
+      const d = r?.data ?? r;
+      if (d?.done) { cline = { ...cline, done: true, success: d.success, email: d.email, error: d.error }; clearInterval(clineTimer); }
+    } catch { /* keep polling */ }
+  }
+  function cancelCline() { clearInterval(clineTimer); cline = null; }
+
   // account
   let curPw = $state("");
   let newUser = $state("");
@@ -262,7 +287,23 @@
       {/if}
     </div>
 
-    <div class="card fade-up" style="--d:240ms">
+  <div class="card fade-up" style="--d:260ms">
+    <div class="eyebrow">cline account</div>
+    <p class="text-[12px] text-[color:var(--color-faint)]">Sign in to your Cline account; the embedded Cline proxy (go tier) will use it for go-key routing.</p>
+    {#if cline?.done}
+      <p class="mt-2 text-[12px] good">{cline.success ? `logged in as ${cline.email}` : `login failed: ${cline.error}`}</p>
+      <button class="btn-ghost mt-2 w-fit" onclick={startCline}>login again</button>
+    {:else if cline?.sessionId}
+      <div class="mt-2 flex flex-col gap-1.5 text-[12px]">
+        <a class="text-[color:var(--color-accent)] underline" href={cline.verificationUri} target="_blank" rel="noreferrer">open verification page</a>
+        <div>user code: <span class="mono">{cline.userCode}</span></div>
+        <div class="faint">waiting for browser approval…</div>
+      </div>
+      <button class="btn-ghost mt-2 w-fit" onclick={cancelCline}>cancel</button>
+    {:else}
+      <button class="btn-ghost mt-2 w-fit" onclick={startCline} disabled={clineBusy}>{clineBusy ? "starting…" : "sign in with Cline"}</button>
+    {/if}
+  </div>\n    <div class="card fade-up" style="--d:240ms">
       <div class="eyebrow">account</div>
       <div class="flex flex-col gap-2.5 text-[13px]">
         <input class="w-full text-[12px]" type="password" placeholder="current password" bind:value={curPw} />

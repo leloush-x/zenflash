@@ -31,12 +31,13 @@ type Server struct {
 	debugAttempts map[string]loginWindow
 	lastInference *DebugInferenceResult
 	sessionsPath  string
+	clineURL      string
 }
 
-func New(manager *gateway.RuntimeManager, monitor *telemetry.Monitor, logs *telemetry.LogHub, logger *slog.Logger, sessionsPath string) *Server {
+func New(manager *gateway.RuntimeManager, monitor *telemetry.Monitor, logs *telemetry.LogHub, logger *slog.Logger, sessionsPath string, clineURL string) *Server {
 	srv := &Server{
 		manager: manager, monitor: monitor, logs: logs, logger: logger, sessions: make(map[string]adminSession),
-		attempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow), sessionsPath: sessionsPath,
+		attempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow), sessionsPath: sessionsPath, clineURL: clineURL,
 	}
 	srv.loadSessions()
 	return srv
@@ -58,6 +59,8 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("GET /api/logs", a.authenticate(http.HandlerFunc(a.handleLogs)))
 	mux.Handle("GET /api/logs/stream", a.authenticate(http.HandlerFunc(a.handleLogStream)))
 	mux.Handle("GET /api/events", a.authenticate(http.HandlerFunc(a.handleEvents)))
+	mux.Handle("POST /api/cline/oauth/start", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineOAuthStart))))
+	mux.Handle("GET /api/cline/oauth/status", a.authenticate(http.HandlerFunc(a.handleClineOAuthStatus)))
 	mux.HandleFunc("/", a.serveSPA())
 	return a.securityHeaders(telemetry.Recover(a.logger, mux))
 }
