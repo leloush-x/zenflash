@@ -63,6 +63,14 @@ func (a *Server) handleClineAccounts(w http.ResponseWriter, r *http.Request) {
 	a.clineProxyJSON(w, r, http.MethodGet, "/admin/api/accounts", nil)
 }
 
+// handleClineAccountAdd registers a Cline account straight from a refresh
+// token, skipping the WorkOS device-register step entirely (useful when the
+// host is blocked from api.cline.bot/auth/register).
+func (a *Server) handleClineAccountAdd(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	a.clineProxyJSON(w, r, http.MethodPost, "/admin/api/accounts/add", body)
+}
+
 // handleClineAccountDelete removes one signed-in Cline account.
 func (a *Server) handleClineAccountDelete(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))

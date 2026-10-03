@@ -14,6 +14,7 @@
   let cline = $state<any>(null);
   let clineBusy = $state(false);
   let accounts = $state<any[]>([]);
+  let refreshToken = $state("");
 
   async function loadAccounts() {
     try {
@@ -71,6 +72,13 @@
     note = m;
     setTimeout(() => (note = ""), 5000);
   };
+
+  async function addClineToken() {
+    if (!refreshToken.trim()) return;
+    const r = await post<any>("/api/cline/accounts/add", { refreshToken: refreshToken.trim() });
+    if (r?.success) { flash("cline account added"); refreshToken = ""; await loadAccounts(); }
+    else flash("add failed: " + (r?.error ?? JSON.stringify(r).slice(0, 120)));
+  }
 
   async function saveConfig() {
     try {
@@ -315,6 +323,13 @@
         {/each}
       </div>
     {/if}
+    <div class="mt-4 flex flex-col gap-1.5">
+      <span class="text-[11px] uppercase tracking-wider text-[color:var(--color-faint)]">or add by refresh token</span>
+      <div class="flex flex-col gap-2 sm:flex-row">
+        <input class="grow font-mono text-[12px]" placeholder="refresh token (skips OAuth register)" bind:value={refreshToken} />
+        <button class="btn-ghost shrink-0" onclick={addClineToken}>add</button>
+      </div>
+    </div>
     {#if cline?.done}
       <p class="mt-2 text-[12px] good">{cline.success ? `logged in as ${cline.email}` : `login failed: ${cline.error}`}</p>
       <button class="btn-ghost mt-2 w-fit" onclick={startCline}>login again</button>
