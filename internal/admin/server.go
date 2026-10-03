@@ -30,13 +30,16 @@ type Server struct {
 	attempts      map[string]loginWindow
 	debugAttempts map[string]loginWindow
 	lastInference *DebugInferenceResult
+	sessionsPath  string
 }
 
-func New(manager *gateway.RuntimeManager, monitor *telemetry.Monitor, logs *telemetry.LogHub, logger *slog.Logger) *Server {
-	return &Server{
+func New(manager *gateway.RuntimeManager, monitor *telemetry.Monitor, logs *telemetry.LogHub, logger *slog.Logger, sessionsPath string) *Server {
+	srv := &Server{
 		manager: manager, monitor: monitor, logs: logs, logger: logger, sessions: make(map[string]adminSession),
-		attempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow),
+		attempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow), sessionsPath: sessionsPath,
 	}
+	srv.loadSessions()
+	return srv
 }
 
 func (a *Server) Handler() http.Handler {

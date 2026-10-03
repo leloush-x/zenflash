@@ -44,7 +44,7 @@
     "enabled": true,
     "listen": "127.0.0.1:8081",
     "username": "admin",
-    "password": "change-this-admin-password",
+    "password": "free",
     "session_ttl_minutes": 720
   },
   "prefer": "go",

@@ -3,7 +3,7 @@
 
   let { onSuccess }: { onSuccess: (username: string, csrf: string) => void } = $props();
 
-  let username = $state("admin");
+  let username = $state(localStorage.getItem("zf.user") ?? "admin");
   let password = $state("");
   let error = $state("");
   let busy = $state(false);
@@ -14,7 +14,7 @@
     error = "";
     try {
       const r = await post<any>("/api/auth/login", { username, password });
-      if (r?.csrf_token) onSuccess(r.username, r.csrf_token);
+      if (r?.csrf_token) { localStorage.setItem("zf.user", r.username); onSuccess(r.username, r.csrf_token); }
       else error = r?.error?.message ?? "login failed";
     } catch (e) {
       error = String(e).includes("401") ? "invalid username or password" : String(e);

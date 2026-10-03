@@ -335,7 +335,9 @@ JSON supports `//` and `/* ... */` comments. Unknown fields are rejected. See [c
 | `webui.enabled` | `false` | example sets `true`; serves the embedded dashboard |
 | `webui.listen` | `127.0.0.1:8081` | optional dedicated admin listener, loopback by default; the dashboard is always also served at `/` on the API port. Set equal to `listen` to disable the dedicated port |
 | `webui.username` | required if enabled | example `admin` |
-| `webui.password` | min length 10 | bootstrap only; hashed at startup |
+| `webui.password` | min length 4 (example: `free`) | bootstrap only; hashed at startup |
+| `-` | `WEBUI_USERNAME` / `WEBUI_PASSWORD` env | override admin credentials |
+| `-` | `config.json.sessions.json` | session store; browsers stay logged in across restarts |
 | `webui.password_hash` | generated | Argon2id; replaces plaintext |
 | `webui.session_ttl_minutes` | `720` | 5–10080 |
 

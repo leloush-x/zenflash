@@ -198,8 +198,8 @@ func Normalize(path string, cfg Config) (Config, error) {
 	if cfg.Logging.RingSize < 100 || cfg.Logging.RingSize > 50000 {
 		return Config{}, errors.New("logging.ring_size must be between 100 and 50000")
 	}
-	if cfg.WebUI.Password != "" && len(cfg.WebUI.Password) < 10 {
-		return Config{}, errors.New("webui.password must contain at least 10 characters")
+	if cfg.WebUI.Password != "" && len(cfg.WebUI.Password) < 4 {
+		return Config{}, errors.New("webui.password must contain at least 4 characters")
 	}
 	if cfg.WebUI.Enabled {
 		cfg.WebUI.Listen = strings.TrimSpace(cfg.WebUI.Listen)

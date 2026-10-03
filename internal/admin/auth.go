@@ -7,9 +7,11 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -73,6 +75,7 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	a.sessions[tokenDigest(token)] = adminSession{Username: cfg.WebUI.Username, AuthVersion: config.Fingerprint(cfg.WebUI.PasswordHash), CSRF: csrf, Expires: expires}
 	a.mu.Unlock()
+	a.persistSessions()
 	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: int(time.Until(expires).Seconds()), Secure: requestIsSecure(r)})
 	w.Header().Set("Cache-Control", "no-store")
 	a.logger.Info("admin login succeeded", "component", "auth", "event", "login_succeeded", "client_ip", client)
@@ -91,6 +94,7 @@ func (a *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		delete(a.sessions, tokenDigest(cookie.Value))
 		a.mu.Unlock()
+		a.persistSessions()
 	}
 	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1, Secure: requestIsSecure(r)})
 	w.WriteHeader(http.StatusNoContent)
@@ -182,6 +186,7 @@ func (a *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	a.sessions = make(map[string]adminSession)
 	a.mu.Unlock()
+	a.persistSessions()
 	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1, Secure: requestIsSecure(r)})
 	a.logger.Info("admin account updated", "component", "auth", "event", "account_updated", "client_ip", clientIP(r))
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"updated": true, "reauthenticate": true})
@@ -267,4 +272,56 @@ func requestIsSecure(r *http.Request) bool {
 		return false
 	}
 	return r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
+// loadSessions restores persisted sessions so a browser stays logged in across
+// gateway restarts. Expired entries are dropped on load.
+func (a *Server) loadSessions() {
+	if a.sessionsPath == "" {
+		return
+	}
+	data, err := os.ReadFile(a.sessionsPath)
+	if err != nil {
+		return
+	}
+	var stored map[string]adminSession
+	if json.Unmarshal(data, &stored) != nil {
+		return
+	}
+	now := time.Now()
+	a.mu.Lock()
+	for token, session := range stored {
+		if now.Before(session.Expires) {
+			a.sessions[token] = session
+		}
+	}
+	a.mu.Unlock()
+}
+
+// persistSessions writes the session map atomically; failures are logged and
+// never block the request path.
+func (a *Server) persistSessions() {
+	if a.sessionsPath == "" {
+		return
+	}
+	a.mu.Lock()
+	stored := make(map[string]adminSession, len(a.sessions))
+	for token, session := range a.sessions {
+		if time.Now().Before(session.Expires) {
+			stored[token] = session
+		}
+	}
+	a.mu.Unlock()
+	data, err := json.Marshal(stored)
+	if err != nil {
+		return
+	}
+	tmp := a.sessionsPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		a.logger.Warn("could not persist sessions", "component", "auth", "error", err)
+		return
+	}
+	if err := os.Rename(tmp, a.sessionsPath); err != nil {
+		a.logger.Warn("could not persist sessions", "component", "auth", "error", err)
+	}
 }

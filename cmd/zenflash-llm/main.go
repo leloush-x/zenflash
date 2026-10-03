@@ -48,6 +48,12 @@ func main() {
 	if *webListen != "" {
 		cfg.WebUI.Listen = *webListen
 	}
+	if v := os.Getenv("WEBUI_USERNAME"); v != "" {
+		cfg.WebUI.Username = v
+	}
+	if v := os.Getenv("WEBUI_PASSWORD"); v != "" {
+		cfg.WebUI.Password = v
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -68,7 +74,7 @@ func main() {
 	servers := []*http.Server{}
 	var apiHandler http.Handler = manager.Handler()
 	if cfg.WebUI.Enabled {
-		admin := adminui.New(manager, monitor, hub, logger)
+		admin := adminui.New(manager, monitor, hub, logger, *configPath+".sessions.json")
 		root := http.NewServeMux()
 		root.Handle("/v1/", manager.Handler())
 		root.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

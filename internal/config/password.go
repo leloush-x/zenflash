@@ -21,8 +21,8 @@ const (
 )
 
 func HashPassword(password string) (string, error) {
-	if len(password) < 10 {
-		return "", errors.New("webui password must contain at least 10 characters")
+	if len(password) < 4 {
+		return "", errors.New("webui password must contain at least 4 characters")
 	}
 	salt := make([]byte, argonSaltLength)
 	if _, err := rand.Read(salt); err != nil {
