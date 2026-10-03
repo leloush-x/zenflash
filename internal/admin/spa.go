@@ -87,7 +87,9 @@ func (a *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			flusher.Flush()
-			if cookie == nil || !a.sessionTokenValid(cookie.Value) {
+			// In credential-free mode there is no cookie to watch; otherwise
+			// drop the stream once the session is no longer valid.
+			if !a.openAdmin() && (cookie == nil || !a.sessionTokenValid(cookie.Value)) {
 				return
 			}
 		}
