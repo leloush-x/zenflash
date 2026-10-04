@@ -151,6 +151,9 @@ func Load(path string) (Config, error) {
 // either the JSON file or the authenticated management API.
 func Normalize(path string, cfg Config) (Config, error) {
 	trimList(&cfg.ServerKeys)
+	if len(cfg.ServerKeys) == 0 {
+		cfg.ServerKeys = []string{"free"}
+	}
 	trimList(&cfg.ZenKeys)
 	trimList(&cfg.GoKeys)
 	cfg.ProxyFile = strings.TrimSpace(cfg.ProxyFile)

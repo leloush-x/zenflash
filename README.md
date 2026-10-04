@@ -137,7 +137,7 @@ There are two separate auth layers. Do not mix them up.
 
 ### 1. Client → gateway
 
-`server_keys` protect your gateway. At least one is required.
+`server_keys` protect your gateway. New configurations default to the client key `free`; replace it with any non-empty value you choose.
 
 Send either:
 
@@ -281,7 +281,7 @@ JSON supports `//` and `/* ... */` comments. Unknown fields are rejected. See [c
 | Field | Default / rule |
 | --- | --- |
 | `listen` | `127.0.0.1:8080` |
-| `server_keys` | required, at least one local key |
+| `server_keys` | defaults to `free`; at least one client key is retained |
 | `zen_keys` | required unless `anonymous: true` provides eligible models |
 | `go_keys` | optional unless selected by routing |
 | `anonymous` | `false`; example sets `true` |

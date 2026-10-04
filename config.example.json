@@ -1,6 +1,8 @@
 {
   "listen": "127.0.0.1:8080",
-  "server_keys": [],
+  "server_keys": [
+    "free"
+  ],
   "zen_keys": [],
   "go_keys": [
     "free"
