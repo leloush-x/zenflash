@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, configToUpdate, put, setCsrf, setOnUnauthorized } from "./lib";
+  import { api, configToUpdate, put, setCsrf, setOnUnauthorized, PUBLIC_API_BASE } from "./lib";
   import Header from "./components/Header.svelte";
   import Overview from "./components/Overview.svelte";
   import Models from "./components/Models.svelte";
@@ -28,7 +28,7 @@
   let user = $state<string | null>(null);
   let checking = $state(true);
   let hasKey = $state(false);
-  let apiBase = $state("");
+  let apiBase = $state(PUBLIC_API_BASE);
   let theme = $state(localStorage.getItem("zf.theme") ?? "mint");
 
   function startStream() {
@@ -56,12 +56,7 @@
           setCsrf(s.csrf_token);
           api("/api/config").then((c) => {
             hasKey = (c.server_keys ?? []).length > 0;
-            const address = String(c.effective?.listen ?? c.listen ?? "");
-            const port = address.slice(address.lastIndexOf(":") + 1);
-            const url = new URL(window.location.origin);
-            if (/^\d+$/.test(port)) url.port = port;
-            apiBase = `${url.origin}/v1`;
-          }).catch(() => { apiBase = `${window.location.origin}/v1`; });
+          }).catch(() => {});
           stop = startStream();
         }
       })

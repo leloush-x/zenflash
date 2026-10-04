@@ -1,5 +1,8 @@
 export type Json = any;
 
+/** Public API address used by hosted client setup examples. */
+export const PUBLIC_API_BASE = "https://zenflash.koyeb.app/v1";
+
 let csrfToken = "";
 export const setCsrf = (t: string) => (csrfToken = t);
 export const getCsrf = () => csrfToken;
