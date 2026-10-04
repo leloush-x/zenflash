@@ -10,5 +10,8 @@ Native Go verification (toolchain at `/usr/local/go/bin/go`):
 - Final `go vet ./...`: passed.
 - Final `go build -trimpath -o /tmp/zenflash-llm ./cmd/zenflash-llm`: passed.
 - `git diff --check`: passed.
+- Repository-wide formatting (`gofmt -l .`) and entrypoint syntax: passed.
 
 Local mock-upstream smoke passed for `GET /v1/models`, Chat non-streaming, Chat streaming, and Anthropic `POST /v1/messages`. No live inference was sent.
+
+GitHub Actions run 37197207096 passed after formatting the existing backend files flagged by the first pushed run (37196998288). The passing run covered formatting, shell syntax, vet, and builds on Go 1.25/stable across Linux and Windows.
