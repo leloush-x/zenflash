@@ -23,7 +23,7 @@ All OpenAI and Anthropic inference routes share `Gateway.handleInference`. It va
 
 There is no SQL database in this checkout. Runtime configuration is JSON (`config.json`, ignored by Git); updates use atomic JSON persistence. The model capability catalog is persisted beside the config as `config.json.models.catalog.json`; pricing metadata from `models.dev` is persisted as `config.json.models.dev.json`; probed effort data is persisted as `config.json.models.effort_index.json`. These cache files are JSON, not SQLite. The Cline account/key state is managed by `internal/cline/app` and is stored outside the gateway catalog. Request logs/metrics are process memory.
 
-Model IDs come from configured upstream `/v1/models` endpoints. Protocol/capability metadata comes from OpenCode's public `https://models.opencode.ai/api.json` catalog, with provider endpoint docs as a supplement. Pricing/free status uses `https://models.dev/api.json`. Capability and pricing snapshots survive upstream failures; model refresh is background-driven. The current effort index, however, is populated by request probes against candidate effort strings. This is not the same as effort levels declared by the upstream model list.
+Model IDs come from configured upstream `/v1/models` endpoints. Protocol/capability metadata comes from OpenCode's public `https://models.opencode.ai/api.json` catalog, with provider endpoint docs as a supplement. Pricing/free status uses `https://models.dev/api.json`. The upstream model metadata format includes `reasoning_options` entries with effort values, but the current `capabilityModel` decoder does not read them. Instead, the current effort index is populated by request probes against a hardcoded candidate sequence. Capability and pricing snapshots survive upstream failures; model refresh is background-driven. The effort parser/validator should consume the declared values and preserve an explicit unknown state when that field is absent.
 
 ## Configuration keys
 
@@ -43,7 +43,7 @@ CLI flags: `-config` (default `config.json`), `-listen`, `-web-listen`, `-versio
 ## Known risks
 
 - This project is Go 1.25 (`go.mod`), not a Bun application. No `package.json`, Bun `typecheck` script, SQLite dependency, or Anthropic-specific models-list route exists. The Anthropic equivalent is the shared `/v1/models` list plus `/v1/messages` inference.
-- Effort support is inferred via live probes from a hardcoded candidate sequence in `internal/gateway/refresh.go`; it does not meet a requirement to report only exact effort levels declared upstream. An upstream probe also sends inference requests and should be treated as behavioral discovery.
+- Effort support is inferred via live probes from a hardcoded candidate sequence in `internal/gateway/refresh.go`; it does not meet a requirement to report only exact effort levels declared upstream. The source schema has `reasoning_options`; the local decoder currently drops that field. An upstream probe also sends inference requests and should be treated as behavioral discovery.
 - Capability model entries represent missing numeric fields as zero and omit them from output. They do not distinguish upstream `unknown` from absent fields as explicit values.
 - The UI is embedded at build time. Do not rebuild or edit `webui/` for backend-only changes.
 - No end-to-end smoke environment or credentials are present in the checkout, so live upstream smoke calls cannot be assumed reproducible.

@@ -1,0 +1,12 @@
+Final verification pass (2026-10-04)
+
+Requested Bun baseline:
+- `bun run typecheck`: failed, no `typecheck` script exists.
+- `bun test`: failed, no tests found.
+
+Native Go verification attempted once because this checkout is a Go module:
+- `go test ./...`: not run; `go` executable is unavailable.
+- `go vet ./...`: not run; `go` executable is unavailable.
+- `go build -trimpath -o /tmp/zenflash-llm ./cmd/zenflash-llm`: not run; `go` executable is unavailable.
+
+Manual `/v1/models`, streaming/non-streaming inference, and `/v1/messages` smoke calls were skipped because the service could not be built or started in this environment. No live upstream inference was sent.
