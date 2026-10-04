@@ -1,0 +1,14 @@
+$ bun run typecheck
+error: Script not found "typecheck"
+
+exit=1
+
+$ bun test
+bun test v1.4.2 (744846f84)
+No tests found!
+
+Tests need ".test", "_test_", ".spec" or "_spec_" in the filename (ex: "MyApp.test.ts")
+
+Learn more about bun test: https://bun.com/docs/cli/test
+
+exit=1
