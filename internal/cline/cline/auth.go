@@ -195,8 +195,10 @@ func RegisterWithCline(workosAccess, workosRefresh string) (*clineAuthResp, erro
 		"X-PLATFORM":         "unknown",
 		"X-PLATFORM-VERSION": "unknown",
 		"X-CLIENT-TYPE":      "unknown",
-		"X-CLIENT-VERSION":   clineClientVersion,
-		"X-CORE-VERSION":     clineClientVersion,
+		// There is no IDE host in the gateway's device-login flow. Cline's
+		// own header builder uses "unknown" for this field in that case.
+		"X-CLIENT-VERSION": "unknown",
+		"X-CORE-VERSION":   clineClientVersion,
 	}
 	resp, err := kit.HTTPPostJSONWithHeaders(ClineAPIBase+"/auth/register", body, headers)
 	if err != nil {
