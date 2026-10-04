@@ -1,7 +1,6 @@
 package app
 
 import (
-	"zenflash-llm/internal/cline/kit"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"zenflash-llm/internal/cline/kit"
 )
 
 // ZenModel opencode zen 免费模型定义

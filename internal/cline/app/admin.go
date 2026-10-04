@@ -1,8 +1,6 @@
 package app
 
 import (
-	"zenflash-llm/internal/cline/cline"
-	"zenflash-llm/internal/cline/kit"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -12,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"zenflash-llm/internal/cline/cline"
+	"zenflash-llm/internal/cline/kit"
 )
 
 // In-memory OAuth login state for async browser login
@@ -32,10 +32,10 @@ type oauthSessionState struct {
 }
 
 type apiResponse struct {
-	Success bool        `json:"success"`
-	Data    any         `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
-	Message string      `json:"message,omitempty"`
+	Success bool   `json:"success"`
+	Data    any    `json:"data,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 func writeAPI(w http.ResponseWriter, status int, resp apiResponse) {
@@ -103,9 +103,9 @@ func handleAdminAccounts(w http.ResponseWriter, r *http.Request) {
 	writeAPI(w, http.StatusOK, apiResponse{
 		Success: true,
 		Data: map[string]any{
-			"accounts":   accounts,
-			"total":      len(accounts),
-			"poolIndex":  loadPool().CurrentIdx,
+			"accounts":  accounts,
+			"total":     len(accounts),
+			"poolIndex": loadPool().CurrentIdx,
 		},
 	})
 }
@@ -685,12 +685,12 @@ func testAccount(acc *Account) (map[string]any, string) {
 		// 网络错误：5 分钟短冷却
 		markAccountCooldown(acc, "network error: "+err.Error(), 5*time.Minute)
 		return map[string]any{
-			"accountId": acc.AccountID,
-			"email":     acc.Email,
-			"status":    "cooldown",
-			"reason":    acc.LastReason,
+			"accountId":     acc.AccountID,
+			"email":         acc.Email,
+			"status":        "cooldown",
+			"reason":        acc.LastReason,
 			"cooldownUntil": acc.CooldownUntil.Format("2006-01-02 15:04:05"),
-			"remaining": formatDuration(time.Until(acc.CooldownUntil)),
+			"remaining":     formatDuration(time.Until(acc.CooldownUntil)),
 		}, "cooldown"
 	}
 	defer resp.Body.Close()

@@ -1,14 +1,14 @@
 package app
 
 import (
-	"zenflash-llm/internal/cline/cline"
-	"zenflash-llm/internal/cline/kit"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"sync"
 	"time"
+	"zenflash-llm/internal/cline/cline"
+	"zenflash-llm/internal/cline/kit"
 )
 
 var (
@@ -246,7 +246,7 @@ func ListAccounts() []*Account {
 			TokensDate:      a.TokensDate,
 			CreatedAt:       a.CreatedAt,
 			CooldownUntil:   a.CooldownUntil,
-			LastReason:     a.LastReason,
+			LastReason:      a.LastReason,
 		}
 	}
 	savePoolLocked()

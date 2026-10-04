@@ -1,12 +1,12 @@
 package app
 
 import (
-	"zenflash-llm/internal/cline/kit"
 	"encoding/json"
 	"log"
 	"os"
 	"sync"
 	"time"
+	"zenflash-llm/internal/cline/kit"
 )
 
 // ============================================================================
