@@ -658,11 +658,13 @@ func encodeChatRequest(request bridgeRequest) (map[string]any, error) {
 	}
 
 	messages := make([]any, 0, len(request.Messages)+1)
-	if len(request.System) > 0 {
-		messages = append(messages, map[string]any{"role": "system", "content": encodeChatBlocks(request.System)})
-	}
-	if len(request.Developer) > 0 {
-		messages = append(messages, map[string]any{"role": "developer", "content": encodeChatBlocks(request.Developer)})
+	// Some OpenAI-compatible Chat upstreams only accept system/user/assistant/
+	// tool roles. Preserve Codex developer instructions by folding them into
+	// the system message instead of forwarding an unsupported developer role.
+	systemBlocks := append([]bridgeBlock(nil), request.System...)
+	systemBlocks = append(systemBlocks, request.Developer...)
+	if len(systemBlocks) > 0 {
+		messages = append(messages, map[string]any{"role": "system", "content": encodeChatBlocks(systemBlocks)})
 	}
 	pending := make(map[string]bool)
 	pendingResults := make(map[string]bridgeBlock)
