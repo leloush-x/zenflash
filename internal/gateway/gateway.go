@@ -141,6 +141,21 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", "model")
 			return
 		}
+		effort, effortParam, requested, validEffort := requestedReasoningEffort(external, payload)
+		if requested && !validEffort {
+			wire.WriteError(w, external, http.StatusBadRequest, "reasoning effort must be a non-empty string", "invalid_request_error", effortParam)
+			return
+		}
+		if !requested {
+			effort = g.cfg.ForcedEffort(model)
+			effortParam = "reasoning_effort"
+		}
+		if effort != "" {
+			if err := g.catalog.ValidateReasoningEffort(model, route.Tier, effort); err != nil {
+				wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", effortParam)
+				return
+			}
+		}
 		if meta != nil {
 			meta.Tier = string(route.Tier)
 			meta.Protocol = route.Protocol
@@ -372,6 +387,33 @@ func (g *Gateway) forwardSystemOne(w http.ResponseWriter, r *http.Request, body 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(responseBody)
+}
+
+func requestedReasoningEffort(protocol wire.Protocol, payload map[string]any) (string, string, bool, bool) {
+	readString := func(value any, param string) (string, string, bool, bool) {
+		if value == nil {
+			return "", "", false, true
+		}
+		effort, ok := value.(string)
+		return effort, param, true, ok && strings.TrimSpace(effort) != ""
+	}
+	switch protocol {
+	case wire.Anthropic:
+		if effort, param, present, valid := readString(jsonutil.AnyAt(payload, "output_config", "effort"), "output_config.effort"); present {
+			return effort, param, present, valid
+		}
+		return readString(payload["effort"], "effort")
+	case wire.Responses:
+		if effort, param, present, valid := readString(jsonutil.AnyAt(payload, "reasoning", "effort"), "reasoning.effort"); present {
+			return effort, param, present, valid
+		}
+		return readString(payload["reasoning_effort"], "reasoning_effort")
+	default:
+		if effort, param, present, valid := readString(payload["reasoning_effort"], "reasoning_effort"); present {
+			return effort, param, present, valid
+		}
+		return readString(jsonutil.AnyAt(payload, "reasoning", "effort"), "reasoning.effort")
+	}
 }
 
 func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, input map[string]any) (map[config.Tier][]byte, error) {

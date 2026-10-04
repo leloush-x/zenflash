@@ -1,20 +1,13 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
 	"zenflash-llm/internal/config"
-	"zenflash-llm/internal/httpx"
 	modelcatalog "zenflash-llm/internal/models"
 	wire "zenflash-llm/internal/protocol"
 )
@@ -180,7 +173,6 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 				if err := g.catalog.SaveCache(); err != nil {
 					g.logger.Warn("model catalog cache write failed", "component", "models", "event", "catalog_cache_write_failed", "error", err)
 				}
-				g.probeModelEfforts(ctx)
 			}
 			g.logger.Info("model catalog refreshed", "component", "models", "event", "catalog_refreshed", "models", len(g.catalog.List()))
 		}
@@ -279,229 +271,4 @@ func (g *Gateway) refreshTier(ctx context.Context, base string, nodes *nodePool)
 	}
 	g.logger.Warn("model catalog refresh failed", "component", "models", "event", "refresh_failed", "upstream", config.RedactURL(base))
 	return nil
-}
-
-var effortProbeValues = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
-
-type effortIndex struct {
-	Models map[string]effortModelInfo `json:"models"`
-}
-
-type effortModelInfo struct {
-	Efforts []string `json:"efforts"`
-	Error   string   `json:"error,omitempty"`
-	// ProbedAt records when this row was last probed so we can avoid
-	// re-hammering upstream, while still retrying errored rows after a
-	// cooldown instead of caching them forever.
-	ProbedAt time.Time `json:"probed_at,omitempty"`
-}
-
-// errorRetryAfter is how long an errored effort row stays in the cache before
-// the next refresh re-probes it.
-const errorRetryAfter = 6 * time.Hour
-
-func (g *Gateway) probeModelEfforts(ctx context.Context) {
-	if !g.cfg.Anonymous || g.cfg.Upstream.Zen == "" {
-		return
-	}
-	cachePath := g.catalog.CachePath()
-	if cachePath == "" {
-		return
-	}
-	indexPath := strings.TrimSuffix(cachePath, ".models.catalog.json") + ".models.effort_index.json"
-	existing := effortIndex{Models: map[string]effortModelInfo{}}
-	if b, err := os.ReadFile(indexPath); err == nil {
-		_ = json.Unmarshal(b, &existing)
-	}
-	var ids []string
-	for _, id := range g.catalog.List() {
-		if !g.catalog.IsFreeModel(id) {
-			continue
-		}
-		if info, ok := existing.Models[id]; ok && len(info.Efforts) > 0 && info.Error == "" {
-			continue
-		}
-		if info, ok := existing.Models[id]; ok && info.Error != "" && time.Since(info.ProbedAt) < errorRetryAfter {
-			continue
-		}
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
-		return
-	}
-	client := &http.Client{Timeout: 20 * time.Second}
-	for _, proxy := range g.transports.items {
-		if proxy != nil && proxy.healthy.Load() {
-			client = proxy.client
-			break
-		}
-	}
-	sem := make(chan struct{}, 4)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	for _, id := range ids {
-		id := id
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			info := probeModelEffort(ctx, client, g.cfg.Upstream.Zen, id)
-			info.ProbedAt = time.Now().UTC()
-			mu.Lock()
-			existing.Models[id] = info
-			mu.Unlock()
-			g.logger.Info("model effort probed", "component", "models", "event", "effort_probe", "model", id, "efforts", len(info.Efforts), "error", info.Error)
-		}()
-	}
-	wg.Wait()
-	if len(existing.Models) == 0 {
-		return
-	}
-	b, err := json.MarshalIndent(existing, "", "  ")
-	if err != nil {
-		return
-	}
-	tmp := indexPath + ".tmp"
-	if err := os.WriteFile(tmp, b, 0600); err == nil {
-		_ = os.Rename(tmp, indexPath)
-	}
-}
-
-func probeModelEffort(ctx context.Context, client *http.Client, base, id string) effortModelInfo {
-	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	var efforts []string
-	var lastErr string
-	for _, effort := range effortProbeValues {
-		payload := map[string]any{
-			"model":            id,
-			"messages":         []map[string]string{{"role": "user", "content": "reply ok"}},
-			"max_tokens":       1,
-			"reasoning_effort": effort,
-			"stream":           true,
-			"stream_options":   map[string]any{"include_usage": true},
-			"tools":            effortProbeTools(),
-		}
-		body, _ := json.Marshal(payload)
-		req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/chat/completions", bytes.NewReader(body))
-		if err != nil {
-			return effortModelInfo{Error: err.Error()}
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+anonymousZenKey)
-		req.Header.Set("User-Agent", httpx.UserAgent())
-		req.Header.Set("x-opencode-client", "cli")
-		req.Header.Set("x-opencode-session", "ses_000000000000AAAAAAAAAAAAAA")
-		req.Header.Set("x-session-affinity", "ses_000000000000AAAAAAAAAAAAAA")
-		req.Header.Set("X-Session-Id", "ses_000000000000AAAAAAAAAAAAAA")
-		req.Header.Set("x-opencode-request", "zenflash_effort_probe")
-		req.Header.Set("x-opencode-project", "zenflash-llm")
-		resp, err := client.Do(req)
-		if err == nil {
-			var body []byte
-			_, body, err = readAllResponse(resp)
-			resp.Body.Close()
-			if err == nil {
-				s := string(body)
-				if resp.StatusCode/100 == 2 && !strings.Contains(s, `"error"`) {
-					efforts = append(efforts, effort)
-					continue
-				}
-				lastErr = parseEffortError(s)
-				if lastErr == "" {
-					lastErr = fmt.Sprintf("HTTP %d", resp.StatusCode)
-				}
-				if allowed := parseAllowedEfforts(s); len(allowed) > 0 {
-					return effortModelInfo{Efforts: allowed}
-				}
-				if strings.Contains(s, `allowed values: []`) || strings.Contains(s, `Supported values: []`) {
-					return effortModelInfo{Efforts: []string{"none"}}
-				}
-				if !strings.Contains(s, "reasoning_effort") && !strings.Contains(s, "reasoning") {
-					lastErr = parseEffortError(s)
-					return effortModelInfo{Efforts: []string{"none"}, Error: lastErr}
-				}
-				continue
-			}
-		}
-		if err != nil {
-			lastErr = err.Error()
-			break
-		}
-	}
-	if len(efforts) == 0 {
-		return effortModelInfo{Efforts: []string{"none"}, Error: lastErr}
-	}
-	return effortModelInfo{Efforts: efforts, Error: lastErr}
-}
-
-func effortProbeTools() []map[string]any {
-	var tools []map[string]any
-	for _, name := range []string{"bash", "edit", "glob", "grep", "read"} {
-		tools = append(tools, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        name,
-				"description": "Agent tool " + name,
-				"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
-			},
-		})
-	}
-	return tools
-}
-
-func parseAllowedEfforts(s string) []string {
-	if i := strings.Index(s, `allowed values: `); i >= 0 {
-		rest := s[i+len(`allowed values: `):]
-		if j := strings.Index(rest, "]"); j > 0 {
-			var allowed []string
-			if err := json.Unmarshal([]byte(rest[:j+1]), &allowed); err == nil {
-				return allowed
-			}
-		}
-	}
-	if i := strings.Index(s, `Supported values: [`); i >= 0 {
-		rest := s[i+len(`Supported values: [`):]
-		if j := strings.Index(rest, "]"); j > 0 {
-			var allowed []string
-			if err := json.Unmarshal([]byte("["+rest[:j+1]), &allowed); err == nil {
-				return allowed
-			}
-		}
-	}
-	return nil
-}
-
-func parseEffortError(s string) string {
-	var v struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal([]byte(s), &v); err == nil {
-		if v.Error.Message != "" {
-			return v.Error.Message
-		}
-		if v.Message != "" {
-			return v.Message
-		}
-	}
-	if len(s) > 160 {
-		return s[:160]
-	}
-	return s
-}
-
-// readAllResponse reads a small upstream body without pulling in extra helpers.
-func readAllResponse(resp *http.Response) (string, []byte, error) {
-	if resp.Body == nil {
-		return "", nil, nil
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if err != nil {
-		return "", nil, err
-	}
-	return "", b, nil
 }

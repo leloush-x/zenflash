@@ -2,6 +2,7 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -462,7 +463,35 @@ func (c *Catalog) Supported(model string) bool {
 func (c *Catalog) MetadataForTier(model string, tier config.Tier) Metadata {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.modelMeta[tier][model]
+	md := c.modelMeta[tier][model]
+	md.ReasoningEfforts = cloneRawMessages(md.ReasoningEfforts)
+	md.InputModalities = append([]string(nil), md.InputModalities...)
+	md.OutputModalities = append([]string(nil), md.OutputModalities...)
+	return md
+}
+
+// ValidateReasoningEffort checks an effort only when the upstream catalog
+// declared effort options. Unknown effort metadata remains pass-through.
+func (c *Catalog) ValidateReasoningEffort(model string, tier config.Tier, effort string) error {
+	c.mu.RLock()
+	values := cloneRawMessages(c.modelMeta[tier][model].ReasoningEfforts)
+	c.mu.RUnlock()
+	if values == nil {
+		return nil
+	}
+	for _, raw := range values {
+		if string(raw) == "null" {
+			if effort == "none" || effort == "disabled" {
+				return nil
+			}
+			continue
+		}
+		var value string
+		if err := json.Unmarshal(raw, &value); err == nil && effort == value {
+			return nil
+		}
+	}
+	return fmt.Errorf("reasoning effort %q is not supported by model %q", effort, model)
 }
 
 func (c *Catalog) supportedLocked(model string) bool {
@@ -521,6 +550,9 @@ func cloneModelMeta(source map[config.Tier]map[string]Metadata) map[config.Tier]
 	result := map[config.Tier]map[string]Metadata{config.TierZen: {}, config.TierGo: {}}
 	for _, tier := range []config.Tier{config.TierZen, config.TierGo} {
 		for id, md := range source[tier] {
+			md.ReasoningEfforts = cloneRawMessages(md.ReasoningEfforts)
+			md.InputModalities = append([]string(nil), md.InputModalities...)
+			md.OutputModalities = append([]string(nil), md.OutputModalities...)
 			result[tier][id] = md
 		}
 	}

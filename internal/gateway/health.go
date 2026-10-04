@@ -1,9 +1,7 @@
 package gateway
 
 import (
-	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -123,26 +121,39 @@ func (g *Gateway) availableModels() ([]modelcatalog.Route, modelcatalog.CatalogS
 func (g *Gateway) handleModels(w http.ResponseWriter, _ *http.Request) {
 	now := time.Now().Unix()
 	routes, _ := g.availableModels()
-	var effortIdx effortIndex
-	if b, err := os.ReadFile(strings.TrimSuffix(g.catalog.CachePath(), ".models.catalog.json") + ".models.effort_index.json"); err == nil {
-		_ = json.Unmarshal(b, &effortIdx)
-	}
 	data := make([]map[string]any, 0, len(routes))
 	for _, route := range routes {
 		model := route.ID
 		// Tier-scoped metadata: the advertised context window must match
 		// the tier that will serve the request (anonymous ⇒ Zen).
 		md := g.catalog.MetadataForTier(model, route.Tier)
-		mdBytes, _ := json.Marshal(md)
 		mdMap := map[string]any{}
-		_ = json.Unmarshal(mdBytes, &mdMap)
-		if info, ok := effortIdx.Models[model]; ok {
-			if len(info.Efforts) > 0 {
-				mdMap["reasoning_efforts"] = info.Efforts
-			}
-			if info.Error != "" {
-				mdMap["reasoning_error"] = info.Error
-			}
+		if md.ContextWindow > 0 {
+			mdMap["context_window"] = md.ContextWindow
+		}
+		if md.MaxInput > 0 {
+			mdMap["max_input"] = md.MaxInput
+		}
+		if md.MaxOutput > 0 {
+			mdMap["max_output"] = md.MaxOutput
+		}
+		if md.Reasoning {
+			mdMap["reasoning"] = true
+		}
+		if md.ReasoningEfforts != nil {
+			mdMap["reasoning_efforts"] = md.ReasoningEfforts
+		}
+		if md.ToolCall {
+			mdMap["tool_call"] = true
+		}
+		if md.StructuredOutput {
+			mdMap["structured_output"] = true
+		}
+		if md.InputModalities != nil {
+			mdMap["input_modalities"] = md.InputModalities
+		}
+		if md.OutputModalities != nil {
+			mdMap["output_modalities"] = md.OutputModalities
 		}
 		entry := map[string]any{
 			"id": model, "object": "model", "created": now, "owned_by": "opencode",
@@ -156,11 +167,8 @@ func (g *Gateway) handleModels(w http.ResponseWriter, _ *http.Request) {
 		}
 		entry["provider"] = provider
 		entry["route_protocol"] = route.Protocol
-		if info, ok := effortIdx.Models[model]; ok && len(info.Efforts) > 0 {
-			entry["reasoning_efforts"] = info.Efforts
-		}
-		if info, ok := effortIdx.Models[model]; ok && info.Error != "" {
-			entry["reasoning_error"] = info.Error
+		if md.ReasoningEfforts != nil {
+			entry["reasoning_efforts"] = md.ReasoningEfforts
 		}
 		// Top-level OpenAI-standard fields: discovery clients (jcode, Pi, …)
 		// read context/reasoning at the top level of each model entry.

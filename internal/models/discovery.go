@@ -37,13 +37,19 @@ type capabilityProvider struct {
 }
 
 type capabilityModel struct {
-	ID               string                     `json:"id"`
-	Provider         *capabilityModelProvider   `json:"provider"`
-	Limit            *capabilityModelLimit      `json:"limit"`
-	Reasoning        bool                       `json:"reasoning"`
-	ToolCall         bool                       `json:"tool_call"`
-	StructuredOutput bool                       `json:"structured_output"`
-	Modalities       *capabilityModelModalities `json:"modalities"`
+	ID               string                      `json:"id"`
+	Provider         *capabilityModelProvider    `json:"provider"`
+	Limit            *capabilityModelLimit       `json:"limit"`
+	Reasoning        bool                        `json:"reasoning"`
+	ReasoningOptions []capabilityReasoningOption `json:"reasoning_options"`
+	ToolCall         bool                        `json:"tool_call"`
+	StructuredOutput bool                        `json:"structured_output"`
+	Modalities       *capabilityModelModalities  `json:"modalities"`
+}
+
+type capabilityReasoningOption struct {
+	Type   string            `json:"type"`
+	Values []json.RawMessage `json:"values"`
 }
 
 type capabilityModelModalities struct {
@@ -62,14 +68,15 @@ type capabilityModelLimit struct {
 // windows and feature flags from the catalog instead of guessing. It is
 // purely additive: routing does not depend on any of these fields.
 type Metadata struct {
-	ContextWindow    int      `json:"context_window,omitempty"`
-	MaxInput         int      `json:"max_input,omitempty"`
-	MaxOutput        int      `json:"max_output,omitempty"`
-	Reasoning        bool     `json:"reasoning,omitempty"`
-	ToolCall         bool     `json:"tool_call,omitempty"`
-	StructuredOutput bool     `json:"structured_output,omitempty"`
-	InputModalities  []string `json:"input_modalities,omitempty"`
-	OutputModalities []string `json:"output_modalities,omitempty"`
+	ContextWindow    int               `json:"context_window,omitempty"`
+	MaxInput         int               `json:"max_input,omitempty"`
+	MaxOutput        int               `json:"max_output,omitempty"`
+	Reasoning        bool              `json:"reasoning,omitempty"`
+	ReasoningEfforts []json.RawMessage `json:"reasoning_efforts,omitempty"`
+	ToolCall         bool              `json:"tool_call,omitempty"`
+	StructuredOutput bool              `json:"structured_output,omitempty"`
+	InputModalities  []string          `json:"input_modalities,omitempty"`
+	OutputModalities []string          `json:"output_modalities,omitempty"`
 }
 
 func (m *capabilityModel) metadata() Metadata {
@@ -77,6 +84,14 @@ func (m *capabilityModel) metadata() Metadata {
 		Reasoning:        m.Reasoning,
 		ToolCall:         m.ToolCall,
 		StructuredOutput: m.StructuredOutput,
+	}
+	for _, option := range m.ReasoningOptions {
+		if option.Type == "effort" {
+			if md.ReasoningEfforts == nil {
+				md.ReasoningEfforts = make([]json.RawMessage, 0, len(option.Values))
+			}
+			md.ReasoningEfforts = append(md.ReasoningEfforts, cloneRawMessages(option.Values)...)
+		}
 	}
 	if m.Modalities != nil {
 		md.InputModalities = m.Modalities.Input
@@ -88,6 +103,17 @@ func (m *capabilityModel) metadata() Metadata {
 		md.MaxOutput = m.Limit.Output
 	}
 	return md
+}
+
+func cloneRawMessages(values []json.RawMessage) []json.RawMessage {
+	if values == nil {
+		return nil
+	}
+	result := make([]json.RawMessage, len(values))
+	for i, value := range values {
+		result[i] = append(json.RawMessage(nil), value...)
+	}
+	return result
 }
 
 type capabilityModelProvider struct {
