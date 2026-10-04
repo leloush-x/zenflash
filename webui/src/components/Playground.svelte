@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, post, ms, num, replyText, replyMeta } from "../lib";
+  import PageHeading from "./PageHeading.svelte";
 
   let data = $state<any>(null);
   let catalog = $state<any>(null);
@@ -59,6 +60,8 @@
     }
   }
 </script>
+
+<PageHeading section="PLAYGROUND" title="API lab" description="Build a request, choose a model, and inspect the gateway response." icon="playground" />
 
 <section class="panel fade-up p-3 sm:p-4">
   <div class="eyebrow">request builder · /api/debug/inference</div>

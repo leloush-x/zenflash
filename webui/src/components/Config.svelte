@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, post, put, configToUpdate } from "../lib";
+  import PageHeading from "./PageHeading.svelte";
 
   let config = $state<any>(null);
   let revealed = $state(false);
@@ -133,6 +134,8 @@
     } else acctNote = "rejected: " + JSON.stringify(r?.error ?? r).slice(0, 120);
   }
 </script>
+
+<PageHeading section="SETTINGS" title="Gateway settings" description="Configure access, routing, model behavior, and runtime limits." icon="settings" />
 
 {#if !config && !failed}
   <div class="fade-up grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

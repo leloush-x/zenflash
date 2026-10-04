@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "../lib";
+  import PageHeading from "./PageHeading.svelte";
 
   let data = $state<any>(null);
   let catalog = $state<any>(null);
@@ -26,6 +27,8 @@
     free.filter((m: any) => !modelFilter.trim() || m.model.toLowerCase().includes(modelFilter.trim().toLowerCase())),
   );
 </script>
+
+<PageHeading section="MODELS" title="Model catalog" description="Explore available models, protocol support, and published capabilities." icon="models" />
 
 <div class="fade-up flex flex-wrap items-center gap-2">
   <div class="eyebrow !mb-0">free models · {visible.length} / {(data?.models ?? []).length}</div>

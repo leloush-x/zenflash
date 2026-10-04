@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { api, put, configToUpdate } from "../lib";
   import { ago } from "../lib";
+  import PageHeading from "./PageHeading.svelte";
 
   let config = $state<any>(null);
   let nodes = $state<any[]>([]);
@@ -48,6 +49,8 @@
   const remove = (idx: number) =>
     saveProxies((config.proxies ?? []).filter((_: any, i: number) => i !== idx).map((p: any) => ({ id: p.id })));
 </script>
+
+<PageHeading section="NETWORK" title="Proxy routes" description="Manage upstream egress and inspect the health of each route." icon="proxies" />
 
 <section class="panel fade-up p-4">
   <div class="flex flex-wrap items-center gap-2">

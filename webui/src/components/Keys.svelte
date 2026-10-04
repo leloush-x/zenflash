@@ -1,9 +1,21 @@
 <script lang="ts">
   import { ago } from "../lib";
+  import PageHeading from "./PageHeading.svelte";
   let { live }: { live: any } = $props();
   const res = $derived(live?.resources);
+  const keyCount = $derived((res?.keys ?? []).length);
+  const zenCount = $derived((res?.keys ?? []).filter((k: any) => k.tier === "zen").length);
+  const goCount = $derived((res?.keys ?? []).filter((k: any) => k.tier === "go").length);
+  const healthyNodes = $derived((res?.proxies ?? []).filter((p: any) => p.healthy).length);
 </script>
 
+<PageHeading section="KEYS" title="Key health" description="Watch provider pools, cooldowns, and proxy health in real time." icon="keys" />
+<div class="resource-strip fade-up">
+  <div class="resource-stat"><span>ZEN POOL</span><strong>{zenCount}</strong><small>provider keys</small></div>
+  <div class="resource-stat"><span>GO POOL</span><strong>{goCount}</strong><small>provider keys</small></div>
+  <div class="resource-stat"><span>ALL KEYS</span><strong>{keyCount}</strong><small>active pool entries</small></div>
+  <div class="resource-stat"><span>PROXY HEALTH</span><strong>{healthyNodes}<i> / {(res?.proxies ?? []).length}</i></strong><small>healthy nodes</small></div>
+</div>
 <div class="fade-up grid gap-3 xl:grid-cols-2">
   <section class="panel p-4">
     <div class="eyebrow">key pool · cooldowns</div>

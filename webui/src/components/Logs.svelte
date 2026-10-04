@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, clock } from "../lib";
+  import PageHeading from "./PageHeading.svelte";
 
   let logs = $state<any[]>([]);
   let logFilter = $state("");
@@ -31,6 +32,8 @@
     logs.filter((l) => !logFilter || l.level === logFilter || JSON.stringify(l.fields ?? {}).includes(logFilter) || l.message?.includes(logFilter)),
   );
 </script>
+
+<PageHeading section="OBSERVABILITY" title="Activity log" description="Follow gateway events as they happen and narrow by severity or message." icon="logs" />
 
 <section class="panel fade-up p-3 sm:p-4">
   <div class="mb-3 flex flex-wrap items-center gap-2">
