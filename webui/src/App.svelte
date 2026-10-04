@@ -84,7 +84,8 @@
     const config = await api("/api/config");
     const bytes = crypto.getRandomValues(new Uint8Array(32));
     const value = `zf_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
-    config.server_keys = [...(config.server_keys ?? []), { value }];
+    // The gateway exposes one shared API key for both OpenAI and Anthropic clients.
+    config.server_keys = [{ value }];
     const response = await put("/api/config", configToUpdate(config));
     if (!response?.config) throw new Error(response?.error?.message ?? "Could not save the API key");
     hasKey = true;

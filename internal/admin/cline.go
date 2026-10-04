@@ -77,6 +77,12 @@ func (a *Server) handleClineAccountDelete(w http.ResponseWriter, r *http.Request
 	a.clineProxyJSON(w, r, http.MethodPost, "/admin/api/accounts/delete", body)
 }
 
+// handleClineAccountTest probes one Cline account through the embedded proxy.
+func (a *Server) handleClineAccountTest(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	a.clineProxyJSON(w, r, http.MethodPost, "/admin/api/accounts/test", body)
+}
+
 func (a *Server) clineProxyJSON(w http.ResponseWriter, r *http.Request, method, path string, body []byte) {
 	if a.clineURL == "" {
 		writeAdminError(w, http.StatusServiceUnavailable, "cline_unavailable", "embedded Cline proxy is disabled (-cline-port 0)")

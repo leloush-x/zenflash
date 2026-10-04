@@ -35,6 +35,10 @@ func HTTPPostForm(rawURL string, form url.Values) (*http.Response, error) {
 }
 
 func HTTPPostJSON(rawURL string, body any) (*http.Response, error) {
+	return HTTPPostJSONWithHeaders(rawURL, body, nil)
+}
+
+func HTTPPostJSONWithHeaders(rawURL string, body any, headers map[string]string) (*http.Response, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -44,6 +48,9 @@ func HTTPPostJSON(rawURL string, body any) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 	return HTTPClient.Do(req)
 }
 

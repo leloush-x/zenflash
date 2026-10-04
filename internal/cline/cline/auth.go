@@ -187,7 +187,18 @@ func RegisterWithCline(workosAccess, workosRefresh string) (*clineAuthResp, erro
 		"accessToken":  workosAccess,
 		"refreshToken": workosRefresh,
 	}
-	resp, err := kit.HTTPPostJSON(ClineAPIBase+"/auth/register", body)
+	// Cline's registration endpoint requires its client identity headers; without
+	// them some edge locations reject the request at the gateway with HTML 403.
+	const clineClientVersion = "4.1.22"
+	headers := map[string]string{
+		"User-Agent":         "Cline/" + clineClientVersion,
+		"X-PLATFORM":         "unknown",
+		"X-PLATFORM-VERSION": "unknown",
+		"X-CLIENT-TYPE":      "unknown",
+		"X-CLIENT-VERSION":   clineClientVersion,
+		"X-CORE-VERSION":     clineClientVersion,
+	}
+	resp, err := kit.HTTPPostJSONWithHeaders(ClineAPIBase+"/auth/register", body, headers)
 	if err != nil {
 		return nil, fmt.Errorf("cline register: %w", err)
 	}

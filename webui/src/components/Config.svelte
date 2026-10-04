@@ -16,6 +16,8 @@
   let clineBusy = $state(false);
   let accounts = $state<any[]>([]);
   let refreshToken = $state("");
+  let testingAccount = $state("");
+  let apiKeyOnce = $state("");
 
   async function loadAccounts() {
     try {
@@ -27,6 +29,29 @@
   async function removeAccount(id: string) {
     await post("/api/cline/accounts/delete", { accountId: id });
     await loadAccounts();
+  }
+
+  async function testAccount(id: string) {
+    testingAccount = id;
+    try {
+      const r = await post<any>("/api/cline/accounts/test", { accountId: id });
+      flash(r?.success ? "Cline account is ready" : `account check: ${r?.message ?? r?.error ?? "failed"}`);
+      await loadAccounts();
+    } catch (e) { flash(`account check failed: ${e}`); }
+    finally { testingAccount = ""; }
+  }
+
+  async function rotateApiKey() {
+    try {
+      const bytes = crypto.getRandomValues(new Uint8Array(32));
+      const value = `zf_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+      const next = { ...config, server_keys: [{ value }] };
+      const r = await put<any>("/api/config", configToUpdate(next));
+      if (!r?.config) throw new Error(r?.error?.message ?? "Could not update API key");
+      config = r.config;
+      apiKeyOnce = value;
+      flash("API key replaced. Copy it now; it is shown only once.");
+    } catch (e) { flash(String(e)); }
   }
 
   onMount(() => { load(); loadAccounts(); });
@@ -135,7 +160,7 @@
   }
 </script>
 
-<PageHeading section="SETTINGS" title="Gateway settings" description="Configure access, routing, model behavior, and runtime limits." icon="settings" />
+<PageHeading section="SETTINGS" title="Gateway settings" description="One API key for your clients, account connections, and gateway behavior." icon="settings" />
 
 {#if !config && !failed}
   <div class="fade-up grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -168,19 +193,19 @@
           <input type="checkbox" bind:checked={config.anonymous} />
         </label>
         <label class="flex items-center justify-between gap-2">
-          <span class="dim">prefer</span>
-          <select bind:value={config.prefer} class="w-auto"><option value="go">go</option><option value="zen">zen</option></select>
+          <span class="dim">routing preference</span>
+          <select bind:value={config.prefer} class="w-auto"><option value="go">primary</option><option value="zen">secondary</option></select>
         </label>
         <label class="flex flex-col gap-1.5">
           <span class="text-[11px] uppercase tracking-wider text-[color:var(--color-faint)]">listen</span>
           <input class="w-full font-mono text-[12px]" bind:value={config.listen} />
         </label>
         <label class="flex flex-col gap-1.5">
-          <span class="text-[11px] uppercase tracking-wider text-[color:var(--color-faint)]">upstream zen</span>
+          <span class="text-[11px] uppercase tracking-wider text-[color:var(--color-faint)]">provider endpoint A</span>
           <input class="w-full font-mono text-[12px]" bind:value={config.upstream.zen} />
         </label>
         <label class="flex flex-col gap-1.5">
-          <span class="text-[11px] uppercase tracking-wider text-[color:var(--color-faint)]">upstream go</span>
+          <span class="text-[11px] uppercase tracking-wider text-[color:var(--color-faint)]">provider endpoint B</span>
           <input class="w-full font-mono text-[12px]" bind:value={config.upstream.go} />
         </label>
         <label class="flex flex-col gap-1.5">
@@ -284,52 +309,44 @@
     </div>
   </div>
 
-  <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+  <div class="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[0.8fr_1.2fr]">
     <div class="card fade-up" style="--d:200ms">
-      <div class="eyebrow">keys</div>
-      <div class="grid grid-cols-3 gap-2 text-[12px]">
-        <div class="rounded-lg border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.6)] p-2.5 text-center">
-          <div class="text-lg font-semibold text-[color:var(--color-accent)] tnum">{config.server_keys.length}</div>
-          <div class="faint text-[10px] uppercase tracking-wider">server</div>
+      <div class="eyebrow">API access</div>
+      <h2 class="text-lg font-semibold">One key. Every API.</h2>
+      <p class="mt-1 text-[12px] dim">Use the same key with OpenAI compatible and Anthropic endpoints.</p>
+      <div class="mt-4 rounded-xl border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.6)] p-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-[12px] dim">Client API key</span>
+          <span class="pill" class:good={config.server_keys?.length}> {config.server_keys?.length ? "configured" : "not set"}</span>
         </div>
-        <div class="rounded-lg border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.6)] p-2.5 text-center">
-          <div class="text-lg font-semibold text-[color:var(--color-accent)] tnum">{config.zen_keys.length}</div>
-          <div class="faint text-[10px] uppercase tracking-wider">zen</div>
-        </div>
-        <div class="rounded-lg border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.6)] p-2.5 text-center">
-          <div class="text-lg font-semibold text-[color:var(--color-accent)] tnum">{config.go_keys.length}</div>
-          <div class="faint text-[10px] uppercase tracking-wider">go</div>
-        </div>
+        <div class="mt-2 font-mono text-[12px]">{apiKeyOnce || config.server_keys?.[0]?.display || "No key configured"}</div>
       </div>
-      {#if revealed}
-        <pre class="mt-2 max-h-32 overflow-auto rounded-lg border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.7)] p-2 text-[11px]">{JSON.stringify({ zen: config.zen_keys.map((k: any) => k.display), go: config.go_keys.map((k: any) => k.display), server: config.server_keys.map((k: any) => k.display) }, null, 2)}</pre>
-      {:else}
-        <div class="mt-2 flex flex-col gap-2">
-          <input class="w-full text-[12px]" type="password" placeholder="admin password to reveal" bind:value={revealPw} />
-          <button class="btn-ghost w-fit" onclick={reveal}>reveal secrets</button>
-        </div>
-      {/if}
+      {#if apiKeyOnce}<button class="btn-ghost mt-3" onclick={() => navigator.clipboard.writeText(apiKeyOnce).then(() => flash("API key copied"))}>copy key</button>{/if}
+      <button class="btn-ghost mt-3" onclick={rotateApiKey}>{config.server_keys?.length ? "replace API key" : "create API key"}</button>
+      <p class="mt-3 text-[11px] faint">Replacing the key disconnects clients still using the previous value.</p>
     </div>
 
   <div class="card fade-up" style="--d:260ms">
-    <div class="eyebrow">cline account</div>
-    <p class="text-[12px] text-[color:var(--color-faint)]">Sign in to your Cline account; the embedded Cline proxy (go tier) will use it for go-key routing.</p>
+    <div class="eyebrow">Cline accounts</div>
+    <h2 class="text-lg font-semibold">Connected accounts</h2>
+    <p class="text-[12px] text-[color:var(--color-faint)]">Connect, verify, and manage accounts used by the Cline provider.</p>
     {#if accounts.length}
       <div class="mt-3 flex flex-col gap-1.5">
         {#each accounts as a (a.accountId)}
           <div class="flex items-center gap-2 rounded-lg border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.6)] px-3 py-2 text-[12px]">
             <span class="min-w-0 grow truncate mono" title={a.email}>{a.email}</span>
             <span class="pill" class:good={a.status === "active"} class:warn={a.status === "cooldown"} class:bad={a.status === "expired"}>{a.status}</span>
-            <span class="pill faint">today {a.usageCountToday ?? 0} req · {a.tokensToday ?? 0} tok</span>
+            <span class="pill faint">today {a.usageCountToday ?? 0} req</span>
+            <button class="btn-ghost !px-2 !py-0.5 text-[11px]" disabled={testingAccount === a.accountId} onclick={() => testAccount(a.accountId)}>{testingAccount === a.accountId ? "checking…" : "test"}</button>
             <button class="btn-danger !px-2 !py-0.5 text-[11px]" onclick={() => removeAccount(a.accountId)} title="remove">×</button>
           </div>
         {/each}
       </div>
     {/if}
     <div class="mt-4 flex flex-col gap-1.5">
-      <span class="text-[11px] uppercase tracking-wider text-[color:var(--color-faint)]">or add by refresh token</span>
+      <span class="text-[11px] uppercase tracking-wider text-[color:var(--color-faint)]">manual token import</span>
       <div class="flex flex-col gap-2 sm:flex-row">
-        <input class="grow font-mono text-[12px]" placeholder="refresh token (skips OAuth register)" bind:value={refreshToken} />
+        <input class="grow font-mono text-[12px]" placeholder="Cline refresh token" bind:value={refreshToken} />
         <button class="btn-ghost shrink-0" onclick={addClineToken}>add</button>
       </div>
     </div>

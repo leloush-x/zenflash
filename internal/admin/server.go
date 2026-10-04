@@ -63,6 +63,7 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("GET /api/cline/oauth/status", a.authenticate(http.HandlerFunc(a.handleClineOAuthStatus)))
 	mux.Handle("GET /api/cline/accounts", a.authenticate(http.HandlerFunc(a.handleClineAccounts)))
 	mux.Handle("POST /api/cline/accounts/delete", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountDelete))))
+	mux.Handle("POST /api/cline/accounts/test", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountTest))))
 	mux.Handle("POST /api/cline/accounts/add", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountAdd))))
 	mux.Handle("GET /api/catalog", a.authenticate(http.HandlerFunc(a.handleCatalog)))
 	a.aliasRouting(mux)

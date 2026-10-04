@@ -235,6 +235,11 @@ func handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oauthSessionsMu.Lock()
+	for id, old := range oauthSessions {
+		if time.Since(old.CreatedAt) > 10*time.Minute {
+			delete(oauthSessions, id)
+		}
+	}
 	oauthSessions[sessionID] = state
 	oauthSessionsMu.Unlock()
 
@@ -313,6 +318,11 @@ func handleOAuthStatus(w http.ResponseWriter, r *http.Request) {
 
 	oauthSessionsMu.Lock()
 	state, ok := oauthSessions[sessionID]
+	var done, success bool
+	var email, stateError string
+	if ok {
+		done, success, email, stateError = state.Done, state.Success, state.Email, state.Error
+	}
 	oauthSessionsMu.Unlock()
 
 	if !ok {
@@ -321,13 +331,13 @@ func handleOAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]any{
-		"done":    state.Done,
-		"success": state.Success,
+		"done":    done,
+		"success": success,
 	}
-	if state.Done {
-		resp["email"] = state.Email
-		if !state.Success {
-			resp["error"] = state.Error
+	if done {
+		resp["email"] = email
+		if !success {
+			resp["error"] = stateError
 		}
 	}
 
