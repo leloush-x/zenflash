@@ -487,8 +487,15 @@ func decodeBridgeRequest(protocol Protocol, input map[string]any) (bridgeRequest
 		}
 		for i, raw := range jsonutil.SliceAt(input, "tools") {
 			tool, ok := raw.(map[string]any)
-			if !ok || jsonutil.StringAt(tool, "type") != "function" {
+			if !ok {
 				return request, fmt.Errorf("tools[%d] must be a function tool", i)
+			}
+			// Responses clients may include provider-hosted tools (for example
+			// custom, web_search, or namespace tools). The chat bridge can only
+			// represent function tools, so omit those entries instead of rejecting
+			// the entire request. Function tools remain available to the upstream.
+			if jsonutil.StringAt(tool, "type") != "function" {
+				continue
 			}
 			request.Tools = append(request.Tools, bridgeTool{
 				Name:        jsonutil.StringAt(tool, "name"),
