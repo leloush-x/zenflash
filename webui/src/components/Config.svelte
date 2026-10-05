@@ -13,6 +13,12 @@
   let cline = $state<any>(null);
   let clineBusy = $state(false);
   let accounts = $state<any[]>([]);
+  let codexAccounts = $state<any[]>([]);
+  let codexModels = $state<any[]>([]);
+  let codexAuthUrl = $state("");
+  let codexCallbackUrl = $state("");
+  let codexBusy = $state(false);
+  let codexLoading = $state(true);
   let refreshToken = $state("");
   let testingAccount = $state("");
   let apiKeyOnce = $state("");
@@ -66,7 +72,7 @@
     } catch (e) { flash(String(e)); }
   }
 
-  onMount(() => { load(); loadAccounts(); });
+  onMount(() => { load(); loadAccounts(); loadCodex(); });
   let clineTimer: any;
   async function startCline() {
     clineBusy = true;
@@ -110,6 +116,68 @@
     note = m;
     setTimeout(() => (note = ""), 5000);
   };
+
+  async function loadCodex() {
+    codexLoading = true;
+    try {
+      const [a, m] = await Promise.all([
+        api<any>("/api/codex/accounts"),
+        api<any>("/api/codex/models"),
+      ]);
+      codexAccounts = a?.accounts ?? [];
+      codexModels = m?.models ?? [];
+    } catch (e) { flash(`Codex status unavailable: ${e}`); }
+    finally { codexLoading = false; }
+  }
+
+  async function startCodex() {
+    codexBusy = true;
+    try {
+      const r = await post<any>("/api/codex/login/start");
+      if (!r?.auth_url) throw new Error(r?.error?.message ?? "Could not start Codex sign-in");
+      codexAuthUrl = r.auth_url;
+      window.open(r.auth_url, "_blank", "noopener,noreferrer");
+    } catch (e) { flash(`Codex sign-in failed: ${e}`); }
+    finally { codexBusy = false; }
+  }
+
+  async function completeCodex() {
+    if (!codexCallbackUrl.trim()) return;
+    codexBusy = true;
+    try {
+      const r = await post<any>("/api/codex/login/complete", { callback_url: codexCallbackUrl.trim() });
+      if (r?.error) throw new Error(r.error.message ?? JSON.stringify(r.error));
+      codexCallbackUrl = "";
+      codexAuthUrl = "";
+      flash(`Codex account connected${r?.account?.email ? ` · ${r.account.email}` : ""}`);
+      await loadCodex();
+    } catch (e) { flash(`Codex sign-in failed: ${e}`); }
+    finally { codexBusy = false; }
+  }
+
+  async function refreshCodex() {
+    codexBusy = true;
+    try {
+      const r = await post<any>("/api/codex/models/refresh");
+      if (r?.error) throw new Error(r.error.message ?? JSON.stringify(r.error));
+      codexModels = r?.models ?? [];
+      await loadCodex();
+      flash("Codex models refreshed");
+    } catch (e) { flash(`Codex refresh failed: ${e}`); }
+    finally { codexBusy = false; }
+  }
+
+  async function removeCodexAccount(id: string) {
+    if (!confirm("Remove this Codex account and its local usage history?")) return;
+    codexBusy = true;
+    try {
+      const r = await post<any>("/api/codex/accounts/delete", { id });
+      if (r?.error) throw new Error(r.error.message ?? JSON.stringify(r.error));
+      flash("Codex account removed");
+      await loadCodex();
+    } catch (e) { flash(`Codex account removal failed: ${e}`); }
+    finally { codexBusy = false; }
+  }
 
   async function addClineToken() {
     if (!refreshToken.trim()) return;
@@ -167,7 +235,7 @@
   }
 </script>
 
-<PageHeading section="SETTINGS" title="Settings" description="Manage API access, Cline accounts, and gateway behavior." icon="settings" />
+<PageHeading section="SETTINGS" title="Settings" description="Manage API access, provider accounts, and gateway behavior." icon="settings" />
 
 {#if !config && !failed}
   <div class="skel h-64"></div>
@@ -190,7 +258,7 @@
 
     <nav class="settings-tabs" aria-label="Settings sections">
       <button class:current={activeSection === "access"} onclick={() => activeSection = "access"}><span>01</span> API access</button>
-      <button class:current={activeSection === "accounts"} onclick={() => activeSection = "accounts"}><span>02</span> Cline accounts <b>{accounts.length}</b></button>
+      <button class:current={activeSection === "accounts"} onclick={() => activeSection = "accounts"}><span>02</span> Provider accounts <b>{accounts.length + codexAccounts.length}</b></button>
       <button class:current={activeSection === "runtime"} onclick={() => activeSection = "runtime"}><span>03</span> Gateway</button>
     </nav>
 
@@ -210,7 +278,7 @@
       </section>
     {:else if activeSection === "accounts"}
       <section class="settings-section">
-        <div class="section-intro"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Cline accounts</h2><p>Connect accounts, check availability, and remove access you no longer use.</p></div><span class="section-index">02 / 03</span></div>
+        <div class="section-intro"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Provider accounts</h2><p>Connect, review, and remove Cline or Codex accounts.</p></div><span class="section-index">02 / 03</span></div>
         <div class="settings-card cline-card">
           <div class="cline-connect">
             <div class="cline-symbol" aria-hidden="true">C</div><div class="cline-copy"><div class="eyebrow">SECURE SIGN IN</div><h3>Connect a Cline account</h3><p>Approve the sign-in in your browser. Your account stays on this gateway.</p></div>
@@ -222,6 +290,39 @@
             <div class="oauth-result" class:success={cline.success}><strong>{cline.success ? `Connected as ${cline.email}` : "Sign-in could not be completed"}</strong>{#if !cline.success}<span>{cline.error}</span>{/if}<button class="text-action" onclick={() => cline = null}>Dismiss</button></div>
           {/if}
         </div>
+
+        <article class="settings-card codex-card">
+          <div class="cline-connect">
+            <div class="codex-symbol" aria-hidden="true">⌘</div>
+            <div class="cline-copy"><div class="eyebrow">CODEX · SIGN IN WITH CHATGPT</div><h3>Codex accounts</h3><p>Pool linked accounts across the Codex models available to them.</p></div>
+            <button class="btn-primary" onclick={startCodex} disabled={codexBusy}>{codexBusy ? "Please wait…" : "Add Codex account"}</button>
+          </div>
+          {#if codexAuthUrl}
+            <div class="codex-login">
+              <a class="btn-ghost" href={codexAuthUrl} target="_blank" rel="noreferrer">Open sign-in ↗</a>
+              <p>After approving, copy the full callback URL from the browser address bar and paste it here.</p>
+              <div class="manual-key-row"><input aria-label="OAuth callback URL" autocomplete="off" placeholder="http://localhost:1455/auth/callback?code=…&state=…" bind:value={codexCallbackUrl} /><button class="btn-primary" onclick={completeCodex} disabled={codexBusy || !codexCallbackUrl.trim()}>{codexBusy ? "Connecting…" : "Finish sign-in"}</button></div>
+            </div>
+          {/if}
+          <div class="account-list-head codex-list-head"><div><h3>Linked Codex accounts</h3><p>{codexAccounts.length} connected · upstream monthly remaining quota is not exposed</p></div><button class="btn-ghost" onclick={refreshCodex} disabled={codexBusy}>{codexBusy ? "Refreshing…" : "Refresh models"}</button></div>
+          {#if codexLoading && !codexAccounts.length}
+            <div class="codex-empty">Loading Codex accounts…</div>
+          {:else if codexAccounts.length}
+            <div class="account-list codex-accounts">
+              {#each codexAccounts as a (a.id)}
+                <article class="account-row">
+                  <div class="account-avatar">{String(a.email || "C").slice(0, 1).toUpperCase()}</div>
+                  <div class="account-identity"><strong title={a.email}>{a.email || "Codex account"}</strong><span>{a.models} models · {a.requests_30d} requests in 30 days</span></div>
+                  <div class="account-usage"><strong>{Number(a.input_tokens_30d || 0) + Number(a.output_tokens_30d || 0)}</strong><span>tokens / 30d</span></div>
+                  <div class="account-actions"><button class="remove-action" disabled={codexBusy} onclick={() => removeCodexAccount(a.id)}>Remove</button></div>
+                </article>
+              {/each}
+            </div>
+          {:else}
+            <div class="codex-empty">No Codex accounts linked yet.</div>
+          {/if}
+          <div class="codex-models"><span>Available models</span>{#if codexModels.length}<div>{#each codexModels as m (m.id)}<code>{m.id}</code>{/each}</div>{:else}<small>Sign in to load the model catalog.</small>{/if}</div>
+        </article>
 
         <div class="account-list-head"><div><h3>Connected accounts</h3><p>{accounts.length} {accounts.length === 1 ? "account" : "accounts"} available to the gateway</p></div><button class="btn-ghost" onclick={loadAccounts} disabled={accountsLoading}>{accountsLoading ? "Refreshing…" : "Refresh list"}</button></div>
         {#if accountsLoading && !accounts.length}
@@ -270,7 +371,8 @@
   .settings-tabs { display:flex;gap:5px;overflow-x:auto;margin:18px 0 8px;padding:5px;border:1px solid var(--line);border-radius:13px;background:color-mix(in oklab,var(--color-panel) 84%,transparent); }.settings-tabs button { min-height:39px;display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--color-dim);white-space:nowrap;font-size:12px; }.settings-tabs button span { color:var(--color-faint);font:10px var(--font-mono); }.settings-tabs button b { padding:1px 7px;border:1px solid var(--line);border-radius:99px;font:10px var(--font-mono); }.settings-tabs button.current { color:var(--color-ink);border-color:var(--line);background:var(--color-raised); }.settings-tabs button.current span { color:var(--color-accent); }
   .settings-section { padding:16px 0 28px; }.section-intro { display:flex;justify-content:space-between;align-items:end;gap:16px;margin:12px 2px 18px; }.section-intro h2 { margin:4px 0 2px;font-size:clamp(21px,3vw,27px);letter-spacing:-.04em; }.section-intro p { margin:0; }.section-index { color:var(--color-faint);font:11px var(--font-mono);white-space:nowrap;padding-bottom:5px; }.eyebrow { color:var(--color-accent);font-size:9px;font-weight:750;letter-spacing:.14em; }
   .access-grid { display:grid;grid-template-columns:minmax(0,1.35fr) minmax(250px,.65fr);gap:13px; }.settings-card { min-width:0;padding:19px;border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,color-mix(in oklab,var(--color-panel) 94%,var(--color-accent) 2%),var(--color-panel));box-shadow:0 12px 32px #0002; }.card-heading { display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:17px; }.card-heading h3,.usage-card h3,.cline-copy h3,.account-list-head h3,.account-empty h3 { margin:3px 0 0;font-size:16px;letter-spacing:-.025em; }.state-pill { padding:4px 9px;border-radius:99px;border:1px solid var(--line);color:var(--color-faint);font-size:10px; }.state-pill.ready { color:var(--color-good);border-color:color-mix(in oklab,var(--color-good) 30%,transparent); }.key-display { display:flex;align-items:center;gap:12px;min-height:58px;padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:color-mix(in oklab,var(--color-bg) 68%,var(--color-panel)); }.key-mark { flex:none;color:var(--color-accent);font:700 9px var(--font-mono);letter-spacing:.12em; }.key-display code { min-width:0;flex:1;overflow-wrap:anywhere;color:var(--color-ink);font:12px var(--font-mono); }.icon-action,.text-action,.remove-action { min-height:30px;padding:4px 9px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--color-dim);font-size:11px; }.key-hint { margin:9px 0 0; }.key-actions { display:flex;align-items:center;gap:12px;margin-top:16px; }.key-actions span { font-size:11px; }.manual-key { display:grid;gap:7px;margin-top:20px;padding-top:17px;border-top:1px solid var(--line); }.manual-key label { font-size:12px;font-weight:600; }.manual-key-row { display:flex;gap:8px; }.manual-key-row input { flex:1;min-width:0; }.manual-key small { font-size:10px; }.usage-card { align-self:stretch; }.usage-card h3 { margin-top:8px;font-size:19px; }.usage-card p { margin:6px 0 18px; }.endpoint { display:grid;gap:4px;padding:11px 0;border-top:1px solid var(--line); }.endpoint span { color:var(--color-faint);font-size:10px;text-transform:uppercase;letter-spacing:.08em; }.endpoint code { font:11px var(--font-mono);overflow-wrap:anywhere; }.endpoint-note { display:flex;align-items:center;gap:9px;margin-top:13px;padding:11px;border-radius:9px;background:color-mix(in oklab,var(--color-bg) 58%,transparent);color:var(--color-dim);font-size:11px; }
-  .cline-card { padding:0;overflow:hidden; }.cline-connect { display:flex;align-items:center;gap:15px;padding:18px; }.cline-symbol,.account-avatar,.empty-mark { display:grid;place-items:center;flex:none;width:42px;height:42px;border:1px solid color-mix(in oklab,var(--color-accent) 27%,var(--line));border-radius:13px;background:color-mix(in oklab,var(--color-accent) 9%,var(--color-panel));color:var(--color-accent);font-weight:700; }.cline-copy { flex:1;min-width:0; }.cline-copy h3 { margin-top:3px; }.cline-copy p { margin:2px 0 0; }.oauth-approval,.oauth-result { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px 20px;padding:16px 18px;border-top:1px solid var(--line);background:color-mix(in oklab,var(--color-accent) 4%,var(--color-panel)); }.oauth-approval strong,.oauth-result strong { display:block;margin-top:5px;font-size:13px; }.oauth-approval p { margin:2px 0 0; }.code-copy { display:flex;align-items:center;gap:8px;padding:5px;border:1px solid var(--line);border-radius:10px;background:var(--color-bg); }.code-copy code { padding:5px 9px;font:600 16px var(--font-mono);letter-spacing:.12em; }.oauth-approval>a { grid-column:1/2;font-size:11px; }.oauth-approval .text-action { grid-column:2;grid-row:2; }.oauth-result { grid-template-columns:1fr auto; }.oauth-result span { color:var(--color-bad);font-size:11px; }.oauth-result.success strong { color:var(--color-good); }
+  .cline-card,.codex-card { padding:0;overflow:hidden; }.cline-connect { display:flex;align-items:center;gap:15px;padding:18px; }.cline-symbol,.codex-symbol,.account-avatar,.empty-mark { display:grid;place-items:center;flex:none;width:42px;height:42px;border:1px solid color-mix(in oklab,var(--color-accent) 27%,var(--line));border-radius:13px;background:color-mix(in oklab,var(--color-accent) 9%,var(--color-panel));color:var(--color-accent);font-weight:700; }.codex-symbol { font-size:21px; }.cline-copy { flex:1;min-width:0; }.cline-copy h3 { margin-top:3px; }.cline-copy p { margin:2px 0 0; }.oauth-approval,.oauth-result { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px 20px;padding:16px 18px;border-top:1px solid var(--line);background:color-mix(in oklab,var(--color-accent) 4%,var(--color-panel)); }.oauth-approval strong,.oauth-result strong { display:block;margin-top:5px;font-size:13px; }.oauth-approval p { margin:2px 0 0; }.code-copy { display:flex;align-items:center;gap:8px;padding:5px;border:1px solid var(--line);border-radius:10px;background:var(--color-bg); }.code-copy code { padding:5px 9px;font:600 16px var(--font-mono);letter-spacing:.12em; }.oauth-approval>a { grid-column:1/2;font-size:11px; }.oauth-approval .text-action { grid-column:2;grid-row:2; }.oauth-result { grid-template-columns:1fr auto; }.oauth-result span { color:var(--color-bad);font-size:11px; }.oauth-result.success strong { color:var(--color-good); }
+  .codex-login { display:grid;gap:9px;padding:15px 18px;border-top:1px solid var(--line);background:color-mix(in oklab,var(--color-accent) 4%,var(--color-panel)); }.codex-login p { margin:0;color:var(--color-faint);font-size:11px; }.codex-login .btn-ghost { justify-self:start; }.codex-list-head { margin:4px 18px 10px; }.codex-empty { margin:0 18px;padding:14px 0;color:var(--color-faint);font-size:12px; }.codex-models { display:grid;gap:9px;margin-top:14px;padding:14px 18px;border-top:1px solid var(--line); }.codex-models>span { color:var(--color-faint);font-size:10px;text-transform:uppercase;letter-spacing:.08em; }.codex-models>div { display:flex;flex-wrap:wrap;gap:6px; }.codex-models code { padding:5px 8px;border:1px solid var(--line);border-radius:7px;color:var(--color-dim);font:10px var(--font-mono); }.codex-models small { color:var(--color-faint);font-size:11px; }.codex-accounts { padding:0 18px; }
   .account-list-head { display:flex;align-items:center;justify-content:space-between;gap:12px;margin:24px 2px 10px; }.account-list-head h3 { font-size:15px; }.account-list-head p { margin:2px 0 0;font-size:11px; }.account-list { display:grid;gap:8px; }.account-row { display:flex;align-items:center;gap:12px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px;background:color-mix(in oklab,var(--color-panel) 90%,transparent); }.account-avatar { width:36px;height:36px;border-radius:11px;font-size:12px; }.account-identity { display:grid;gap:3px;flex:1;min-width:0; }.account-identity strong { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px; }.account-identity span,.account-usage span { color:var(--color-faint);font-size:10px; }.account-state { display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--line);border-radius:99px;color:var(--color-faint);font-size:10px;text-transform:capitalize;white-space:nowrap; }.account-state i { width:6px;height:6px;border-radius:50%;background:currentColor; }.account-state.ready { color:var(--color-good); }.account-state.cooling { color:var(--color-warn); }.account-state.expired { color:var(--color-bad); }.account-usage { display:grid;gap:2px;min-width:73px;text-align:right; }.account-usage strong { font:12px var(--font-mono); }.account-actions { display:flex;align-items:center;gap:4px; }.remove-action { color:var(--color-bad); }.account-empty { display:grid;justify-items:center;text-align:center;padding:28px 16px; }.empty-mark { width:38px;height:38px;border-radius:50%; }.account-empty h3 { margin-top:10px; }.account-empty p { margin:4px 0 0;color:var(--color-faint);font-size:12px; }.manual-import { margin-top:13px;border:1px solid var(--line);border-radius:12px;background:color-mix(in oklab,var(--color-panel) 78%,transparent); }.manual-import summary { padding:13px 15px;cursor:pointer;color:var(--color-dim);font-size:12px; }.manual-import-body { padding:0 15px 15px; }.manual-import-body p { margin:0 0 9px; }.token-field { flex:1;min-width:0; }
   .runtime-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }.field-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 14px; }.field-grid label { display:grid;align-content:start;gap:6px;min-width:0;color:var(--color-faint);font-size:10px;font-weight:600;letter-spacing:.025em; }.field-grid input:not([type="checkbox"]),.field-grid select,.field-grid textarea { width:100%;font-size:12px; }.field-grid .wide-field { grid-column:1/-1; }.toggle-field { display:flex;align-items:center;gap:9px;min-height:36px;min-width:0;color:var(--color-dim);font-size:11px;font-weight:400;letter-spacing:0; }.field-grid .toggle-field input[type="checkbox"] { width:18px;height:18px;min-width:18px;min-height:18px;flex:0 0 18px; }.toggle-field>span { min-width:0;overflow-wrap:anywhere; }.account-save { display:flex;align-items:center;gap:10px; }.account-save span { font-size:11px;color:var(--color-accent); }
   @media(max-width:800px) { .access-grid,.runtime-grid { grid-template-columns:1fr; }.usage-card { display:grid;grid-template-columns:1fr 1fr;column-gap:18px; }.usage-card>.eyebrow,.usage-card h3,.usage-card p,.endpoint-note { grid-column:1/-1; }.usage-card p { margin-bottom:8px; }.endpoint { min-width:0; } }
