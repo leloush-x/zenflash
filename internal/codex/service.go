@@ -255,7 +255,8 @@ func (s *Service) StartLogin() (map[string]string, error) {
 // can be managed remotely and cannot receive the browser's loopback request.
 func (s *Service) CompleteLogin(ctx context.Context, raw string) (AccountView, error) {
 	u, err := url.ParseRequestURI(strings.TrimSpace(raw))
-	if err != nil || u.Scheme != "http" || u.Host != "127.0.0.1:1455" || u.Path != "/auth/callback" {
+	validCallbackHost := err == nil && u.Scheme == "http" && u.Port() == "1455" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost")
+	if err != nil || !validCallbackHost || u.Path != "/auth/callback" || u.User != nil || u.Fragment != "" {
 		return AccountView{}, errors.New("paste the full http://127.0.0.1:1455/auth/callback URL")
 	}
 	q := u.Query()
