@@ -9,8 +9,15 @@ import (
 	"zenflash-llm/internal/httpx"
 )
 
-func (a *Server) handleCodexLoginStart(w http.ResponseWriter, _ *http.Request) {
-	result, err := a.codex.StartLogin()
+func (a *Server) handleCodexLoginStart(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := decodeAdminJSON(w, r, &req); err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	result, err := a.codex.StartLogin(req.ClientID)
 	if err != nil {
 		writeAdminError(w, http.StatusInternalServerError, "codex_login_failed", err.Error())
 		return

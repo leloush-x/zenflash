@@ -73,6 +73,7 @@ type diskState struct {
 }
 type login struct {
 	State, Nonce, Verifier string
+	ClientID               string
 	Created                time.Time
 }
 type AccountView struct {
@@ -215,7 +216,19 @@ func challenge(v string) string {
 }
 
 // StartLogin returns an OpenAI authorization link and a state-bound session ID.
-func (s *Service) StartLogin() (map[string]string, error) {
+func (s *Service) StartLogin(issuedClientID string) (map[string]string, error) {
+	clientID := "dynamic_agent_client"
+	if issuedClientID != "" {
+		if !strings.HasPrefix(issuedClientID, "oaiapp_") || len(issuedClientID) <= len("oaiapp_") {
+			return nil, errors.New("invalid issued Codex client ID")
+		}
+		for _, r := range issuedClientID[len("oaiapp_"):] {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+				return nil, errors.New("invalid issued Codex client ID")
+			}
+		}
+		clientID = issuedClientID
+	}
 	state, err := random(32)
 	if err != nil {
 		return nil, err
@@ -234,11 +247,11 @@ func (s *Service) StartLogin() (map[string]string, error) {
 			delete(s.pending, key)
 		}
 	}
-	s.pending[state] = login{State: state, Nonce: nonce, Verifier: verifier, Created: time.Now()}
+	s.pending[state] = login{State: state, Nonce: nonce, Verifier: verifier, ClientID: clientID, Created: time.Now()}
 	s.mu.Unlock()
 	q := url.Values{}
 	q.Set("response_type", "code")
-	q.Set("client_id", "dynamic_agent_client")
+	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("scope", scopes)
 	q.Set("resource", resource)
@@ -247,7 +260,9 @@ func (s *Service) StartLogin() (map[string]string, error) {
 	q.Set("code_challenge", challenge(verifier))
 	q.Set("code_challenge_method", "S256")
 	q.Set("ext_agent_host_id", s.state.HostID)
-	q.Set("agent_name_hint", "ZenFlash")
+	if clientID == "dynamic_agent_client" {
+		q.Set("agent_name_hint", "ZenFlash")
+	}
 	return map[string]string{"auth_url": authorizeURL + "?" + q.Encode(), "state": state, "redirect_uri": redirectURI}, nil
 }
 
@@ -260,9 +275,9 @@ func (s *Service) CompleteLogin(ctx context.Context, raw string) (AccountView, e
 		return AccountView{}, errors.New("paste the full http://127.0.0.1:1455/auth/callback URL")
 	}
 	q := u.Query()
-	state, code, clientID := q.Get("state"), q.Get("code"), q.Get("client_id")
-	if state == "" || code == "" || clientID == "" {
-		return AccountView{}, errors.New("callback must include code, state, and issued client_id")
+	state, code, callbackClientID := q.Get("state"), q.Get("code"), q.Get("client_id")
+	if state == "" || code == "" {
+		return AccountView{}, errors.New("callback must include code and state")
 	}
 	s.mu.Lock()
 	attempt, ok := s.pending[state]
@@ -270,6 +285,15 @@ func (s *Service) CompleteLogin(ctx context.Context, raw string) (AccountView, e
 	s.mu.Unlock()
 	if !ok || time.Since(attempt.Created) > 30*time.Minute {
 		return AccountView{}, errors.New("login session is missing or expired")
+	}
+	clientID := attempt.ClientID
+	if clientID == "dynamic_agent_client" {
+		clientID = callbackClientID
+		if !strings.HasPrefix(clientID, "oaiapp_") || len(clientID) <= len("oaiapp_") {
+			return AccountView{}, errors.New("new registration callback must include its issued client_id")
+		}
+	} else if callbackClientID != "" && callbackClientID != clientID {
+		return AccountView{}, errors.New("callback client_id does not match the issued client for this retry")
 	}
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
