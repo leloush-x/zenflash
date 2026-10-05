@@ -279,31 +279,17 @@
     {:else if activeSection === "accounts"}
       <section class="settings-section">
         <div class="section-intro"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Provider accounts</h2><p>Connect, review, and remove Cline or Codex accounts.</p></div><span class="section-index">02 / 03</span></div>
-        <div class="settings-card cline-card">
-          <div class="cline-connect">
-            <div class="cline-symbol" aria-hidden="true">C</div><div class="cline-copy"><div class="eyebrow">SECURE SIGN IN</div><h3>Connect a Cline account</h3><p>Approve the sign-in in your browser. Your account stays on this gateway.</p></div>
-            {#if !cline?.sessionId || cline?.done}<button class="btn-primary" onclick={startCline} disabled={clineBusy}>{clineBusy ? "Starting…" : "Connect with Cline"}</button>{/if}
-          </div>
-          {#if cline?.sessionId && !cline?.done}
-            <div class="oauth-approval"><div><div class="eyebrow">WAITING FOR APPROVAL</div><strong>Enter this code in Cline</strong><p>Keep this page open while you approve the request.</p></div><div class="code-copy"><code>{cline.userCode}</code><button class="btn-ghost" onclick={() => navigator.clipboard.writeText(cline.userCode).then(() => flash("Sign-in code copied"))}>Copy code</button></div><a href={cline.verificationUri} target="_blank" rel="noreferrer">Open Cline verification page ↗</a><button class="text-action" onclick={cancelCline}>Cancel sign-in</button></div>
-          {:else if cline?.done}
-            <div class="oauth-result" class:success={cline.success}><strong>{cline.success ? `Connected as ${cline.email}` : "Sign-in could not be completed"}</strong>{#if !cline.success}<span>{cline.error}</span>{/if}<button class="text-action" onclick={() => cline = null}>Dismiss</button></div>
-          {/if}
-        </div>
-
         <article class="settings-card codex-card">
           <div class="cline-connect">
             <div class="codex-symbol" aria-hidden="true">⌘</div>
             <div class="cline-copy"><div class="eyebrow">CODEX · SIGN IN WITH CHATGPT</div><h3>Codex accounts</h3><p>Pool linked accounts across the Codex models available to them.</p></div>
             <button class="btn-primary" onclick={startCodex} disabled={codexBusy}>{codexBusy ? "Please wait…" : "Add Codex account"}</button>
           </div>
-          {#if codexAuthUrl}
-            <div class="codex-login">
-              <a class="btn-ghost" href={codexAuthUrl} target="_blank" rel="noreferrer">Open sign-in ↗</a>
-              <p>After approving, copy the full callback URL from the browser address bar and paste it here.</p>
-              <div class="manual-key-row"><input aria-label="OAuth callback URL" autocomplete="off" placeholder="http://localhost:1455/auth/callback?code=…&state=…" bind:value={codexCallbackUrl} /><button class="btn-primary" onclick={completeCodex} disabled={codexBusy || !codexCallbackUrl.trim()}>{codexBusy ? "Connecting…" : "Finish sign-in"}</button></div>
-            </div>
-          {/if}
+          <div class="codex-login">
+            {#if codexAuthUrl}<a class="btn-ghost" href={codexAuthUrl} target="_blank" rel="noreferrer">Open sign-in ↗</a>{/if}
+            <p>After approval, paste the full callback URL here—even if the browser says localhost refused the connection.</p>
+            <div class="manual-key-row"><input aria-label="OAuth callback URL" autocomplete="off" placeholder="Paste http://127.0.0.1:1455/auth/callback?..." bind:value={codexCallbackUrl} /><button class="btn-primary" onclick={completeCodex} disabled={codexBusy || !codexCallbackUrl.trim()}>{codexBusy ? "Connecting…" : "Finish sign-in"}</button></div>
+          </div>
           <div class="account-list-head codex-list-head"><div><h3>Linked Codex accounts</h3><p>{codexAccounts.length} connected · upstream monthly remaining quota is not exposed</p></div><button class="btn-ghost" onclick={refreshCodex} disabled={codexBusy}>{codexBusy ? "Refreshing…" : "Refresh models"}</button></div>
           {#if codexLoading && !codexAccounts.length}
             <div class="codex-empty">Loading Codex accounts…</div>
@@ -323,6 +309,20 @@
           {/if}
           <div class="codex-models"><span>Available models</span>{#if codexModels.length}<div>{#each codexModels as m (m.id)}<code>{m.id}</code>{/each}</div>{:else}<small>Sign in to load the model catalog.</small>{/if}</div>
         </article>
+
+        <div class="settings-card cline-card">
+          <div class="cline-connect">
+            <div class="cline-symbol" aria-hidden="true">C</div><div class="cline-copy"><div class="eyebrow">SECURE SIGN IN</div><h3>Connect a Cline account</h3><p>Approve the sign-in in your browser. Your account stays on this gateway.</p></div>
+            {#if !cline?.sessionId || cline?.done}<button class="btn-primary" onclick={startCline} disabled={clineBusy}>{clineBusy ? "Starting…" : "Connect with Cline"}</button>{/if}
+          </div>
+          {#if cline?.sessionId && !cline?.done}
+            <div class="oauth-approval"><div><div class="eyebrow">WAITING FOR APPROVAL</div><strong>Enter this code in Cline</strong><p>Keep this page open while you approve the request.</p></div><div class="code-copy"><code>{cline.userCode}</code><button class="btn-ghost" onclick={() => navigator.clipboard.writeText(cline.userCode).then(() => flash("Sign-in code copied"))}>Copy code</button></div><a href={cline.verificationUri} target="_blank" rel="noreferrer">Open Cline verification page ↗</a><button class="text-action" onclick={cancelCline}>Cancel sign-in</button></div>
+          {:else if cline?.done}
+            <div class="oauth-result" class:success={cline.success}><strong>{cline.success ? `Connected as ${cline.email}` : "Sign-in could not be completed"}</strong>{#if !cline.success}<span>{cline.error}</span>{/if}<button class="text-action" onclick={() => cline = null}>Dismiss</button></div>
+          {/if}
+        </div>
+
+
 
         <div class="account-list-head"><div><h3>Connected accounts</h3><p>{accounts.length} {accounts.length === 1 ? "account" : "accounts"} available to the gateway</p></div><button class="btn-ghost" onclick={loadAccounts} disabled={accountsLoading}>{accountsLoading ? "Refreshing…" : "Refresh list"}</button></div>
         {#if accountsLoading && !accounts.length}
