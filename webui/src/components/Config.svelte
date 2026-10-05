@@ -304,7 +304,7 @@
           </div>
           <div class="codex-login">
             {#if codexAuthUrl}<a class="btn-ghost" href={codexAuthUrl} target="_blank" rel="noreferrer">Open sign-in ↗</a>{/if}
-            <p>First click <strong>Add Codex account</strong>. After approval, the browser may show a localhost error; copy its entire address and paste it here.</p>
+            <p>First click <strong>Add Codex account</strong>. OpenAI requires the 127.0.0.1 callback for Codex sign-in; after approval the browser may show a localhost error. Copy its full address here.</p>
             <div class="manual-key-row"><input aria-label="OAuth callback URL" autocomplete="off" placeholder="Paste http://127.0.0.1:1455/auth/callback?..." bind:value={codexCallbackUrl} /><button class="btn-primary" onclick={completeCodex} disabled={codexBusy || !codexCallbackUrl.trim()}>{codexBusy ? "Connecting…" : "Finish sign-in"}</button></div>
             {#if codexNotice}<div class="codex-notice" class:error={codexNoticeKind === "error"} class:success={codexNoticeKind === "success"} role="status" aria-live="polite">{codexNotice}</div>{/if}
           </div>

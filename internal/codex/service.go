@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	authorizeURL = "https://auth.openai.com/oauth/authorize"
+	authorizeURL = "https://auth.openai.com/api/accounts/authorize"
 	tokenURL     = "https://auth.openai.com/api/accounts/oauth/token"
 	modelsURL    = "https://api.openai.com/v1/models"
 	responsesURL = "https://api.openai.com/v1/responses"
