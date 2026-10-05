@@ -17,6 +17,32 @@
 
 **zenflash-llm** is a single static Go binary that exposes OpenCode Zen / Zen Go and Cline account models through familiar APIs: OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, and OpenCode System One for Jev. It keeps an embedded Cline account backend, health/model refreshes, key/proxy pools, and request conversion in the same process — no separate Cline binary is required.
 
+## Experimental Codex account pool
+
+ZenFlash includes a backend-only Sign in with ChatGPT provider for Responses,
+Chat Completions, and Anthropic Messages requests. It polls each linked
+account's `GET /v1/models` catalog and exposes entries OpenAI marks with
+`visibility: "list"`. Requests for those models are assigned round-robin to
+accounts that list them; a 401 refreshes that account and a 429 tries the next
+eligible account. Upstream requests use `store: false` and Responses streaming.
+
+Use the authenticated admin API to manage accounts:
+
+- `POST /api/codex/login/start` returns `auth_url`.
+- Open it, authorize the app, then post the full callback URL to
+  `POST /api/codex/login/complete` as `{"callback_url":"..."}`.
+- `GET /api/codex/accounts`, `/api/codex/models`, and `/api/codex/usage`
+  show linked accounts, the merged eligible catalog, and local rolling 30-day
+  request/token totals. `POST /api/codex/models/refresh` polls immediately;
+  `POST /api/codex/accounts/delete` accepts the account `id` returned above.
+- Use the normal ZenFlash API key at `/v1/models`, `/v1/responses`,
+  `/v1/chat/completions`, or `/v1/messages`.
+
+OAuth tokens and cached account data are encrypted in `<config>.codex.enc`;
+the 0600 key is stored beside it. OpenAI does not expose a numeric remaining
+monthly allowance through this integration, so `/api/codex/usage` reports
+ZenFlash's observed usage and links to ChatGPT Usage settings.
+
 The gateway management UI is embedded in the binary and served at `/` on the main API port — log in with the configured admin account. A dedicated admin listener remains available via `webui.listen` (default loopback `127.0.0.1:8081`). Cline admin is also available at the embedded Cline port (`-cline-port`, default `3457`) when that downstream server is started.
 
 ## Feature grid

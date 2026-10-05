@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"zenflash-llm/internal/buildinfo"
+	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/gateway"
 	"zenflash-llm/internal/httpx"
@@ -32,12 +33,13 @@ type Server struct {
 	lastInference *DebugInferenceResult
 	sessionsPath  string
 	clineURL      string
+	codex         *codex.Service
 }
 
-func New(manager *gateway.RuntimeManager, monitor *telemetry.Monitor, logs *telemetry.LogHub, logger *slog.Logger, sessionsPath string, clineURL string) *Server {
+func New(manager *gateway.RuntimeManager, monitor *telemetry.Monitor, logs *telemetry.LogHub, logger *slog.Logger, sessionsPath string, clineURL string, codexService *codex.Service) *Server {
 	srv := &Server{
 		manager: manager, monitor: monitor, logs: logs, logger: logger, sessions: make(map[string]adminSession),
-		attempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow), sessionsPath: sessionsPath, clineURL: clineURL,
+		attempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow), sessionsPath: sessionsPath, clineURL: clineURL, codex: codexService,
 	}
 	srv.loadSessions()
 	return srv
@@ -66,6 +68,15 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("POST /api/cline/accounts/test", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountTest))))
 	mux.Handle("POST /api/cline/accounts/add", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountAdd))))
 	mux.Handle("GET /api/catalog", a.authenticate(http.HandlerFunc(a.handleCatalog)))
+	if a.codex != nil {
+		mux.Handle("POST /api/codex/login/start", a.authenticate(a.csrf(http.HandlerFunc(a.handleCodexLoginStart))))
+		mux.Handle("POST /api/codex/login/complete", a.authenticate(a.csrf(http.HandlerFunc(a.handleCodexLoginComplete))))
+		mux.Handle("GET /api/codex/accounts", a.authenticate(http.HandlerFunc(a.handleCodexAccounts)))
+		mux.Handle("POST /api/codex/accounts/delete", a.authenticate(a.csrf(http.HandlerFunc(a.handleCodexAccountDelete))))
+		mux.Handle("GET /api/codex/models", a.authenticate(http.HandlerFunc(a.handleCodexModels)))
+		mux.Handle("POST /api/codex/models/refresh", a.authenticate(a.csrf(http.HandlerFunc(a.handleCodexModelRefresh))))
+		mux.Handle("GET /api/codex/usage", a.authenticate(http.HandlerFunc(a.handleCodexUsage)))
+	}
 	a.aliasRouting(mux)
 	mux.HandleFunc("/", a.serveSPA())
 	return a.securityHeaders(telemetry.Recover(a.logger, mux))
