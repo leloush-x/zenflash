@@ -134,14 +134,15 @@
 
   async function startCodex() {
     codexBusy = true;
+    codexAuthUrl = "";
+    codexCallbackUrl = "";
     codexNotice = "Starting a fresh sign-in…";
     codexNoticeKind = "info";
     try {
       const r = await post<any>("/api/codex/login/start");
       if (!r?.auth_url) throw new Error(r?.error?.message ?? "Could not start Codex sign-in");
       codexAuthUrl = r.auth_url;
-      const tab = window.open(r.auth_url, "_blank", "noopener,noreferrer");
-      codexNotice = tab ? "Sign in in the new tab. When it redirects to localhost, copy the full address and paste it below." : "Sign-in link ready. Open it, approve access, then paste the full localhost callback address below.";
+      codexNotice = "Sign-in link ready. Open it once, approve access, then copy the full localhost callback address into the field below.";
       codexNoticeKind = "info";
     } catch (e) { codexNotice = `Could not start sign-in: ${e}`; codexNoticeKind = "error"; }
     finally { codexBusy = false; }
@@ -303,8 +304,8 @@
             <button class="btn-primary" onclick={startCodex} disabled={codexBusy}>{codexBusy ? "Please wait…" : "Add Codex account"}</button>
           </div>
           <div class="codex-login">
-            {#if codexAuthUrl}<a class="btn-ghost" href={codexAuthUrl} target="_blank" rel="noreferrer">Open sign-in ↗</a>{/if}
-            <p>First click <strong>Add Codex account</strong>. OpenAI requires the 127.0.0.1 callback for Codex sign-in; after approval the browser may show a localhost error. Copy its full address here.</p>
+            {#if codexAuthUrl}<a class="btn-ghost" href={codexAuthUrl} target="_blank" rel="noreferrer">Continue with ChatGPT ↗</a>{/if}
+            <p>1. Click <strong>Add Codex account</strong> to create a sign-in link. 2. Open that link once and approve. 3. Copy the full 127.0.0.1 callback address here. OpenAI requires this loopback callback for Codex plan access.</p>
             <div class="manual-key-row"><input aria-label="OAuth callback URL" autocomplete="off" placeholder="Paste http://127.0.0.1:1455/auth/callback?..." bind:value={codexCallbackUrl} /><button class="btn-primary" onclick={completeCodex} disabled={codexBusy || !codexCallbackUrl.trim()}>{codexBusy ? "Connecting…" : "Finish sign-in"}</button></div>
             {#if codexNotice}<div class="codex-notice" class:error={codexNoticeKind === "error"} class:success={codexNoticeKind === "success"} role="status" aria-live="polite">{codexNotice}</div>{/if}
           </div>
