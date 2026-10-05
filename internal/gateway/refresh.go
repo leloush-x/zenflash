@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	modelcatalog "zenflash-llm/internal/models"
 	wire "zenflash-llm/internal/protocol"
@@ -71,8 +72,12 @@ func (g *Gateway) rebindFailedProxy(proxy *proxyTransport) (zenMoved, goMoved in
 func (g *Gateway) rebindUnavailableProxy(proxy *proxyTransport, wasHealthy bool) (zenMoved, goMoved int) {
 	zenMoved = g.zenNodes.RebindProxy(proxy.index)
 	goMoved = g.goNodes.RebindProxy(proxy.index)
-	if wasHealthy || zenMoved+goMoved > 0 {
-		g.logger.Warn("proxy became unavailable", "component", "proxy", "event", "proxy_unavailable", "proxy", config.RedactURL(proxy.name), "zen_keys_moved", zenMoved, "go_keys_moved", goMoved)
+	codexMoved := 0
+	if pool := g.codexPool(); pool != nil {
+		codexMoved = pool.RebindProxy(proxy.index)
+	}
+	if wasHealthy || zenMoved+goMoved+codexMoved > 0 {
+		g.logger.Warn("proxy became unavailable", "component", "proxy", "event", "proxy_unavailable", "proxy", config.RedactURL(proxy.name), "zen_keys_moved", zenMoved, "go_keys_moved", goMoved, "codex_keys_moved", codexMoved)
 	}
 	return zenMoved, goMoved
 }
@@ -83,8 +88,12 @@ func (g *Gateway) restoreProxy(proxy *proxyTransport) (zenMoved, goMoved int) {
 	}
 	zenMoved = g.zenNodes.RestoreProxy(proxy.index)
 	goMoved = g.goNodes.RestoreProxy(proxy.index)
-	if zenMoved+goMoved > 0 {
-		g.logger.Info("proxy connectivity restored", "component", "proxy", "event", "proxy_restored", "proxy", config.RedactURL(proxy.name), "zen_keys_moved", zenMoved, "go_keys_moved", goMoved)
+	codexMoved := 0
+	if pool := g.codexPool(); pool != nil {
+		codexMoved = pool.RestoreProxy(proxy.index)
+	}
+	if zenMoved+goMoved+codexMoved > 0 {
+		g.logger.Info("proxy connectivity restored", "component", "proxy", "event", "proxy_restored", "proxy", config.RedactURL(proxy.name), "zen_keys_moved", zenMoved, "go_keys_moved", goMoved, "codex_keys_moved", codexMoved)
 	}
 	return zenMoved, goMoved
 }
@@ -134,13 +143,14 @@ func (g *Gateway) applyProxyHealthResult(result proxyHealthResult, source string
 
 func (g *Gateway) StartModelRefresh(ctx context.Context) {
 	refresh := func() {
-		var zen, goModels []string
+		var zen, goModels, codexModels []string
 		var capabilities modelcatalog.Capabilities
 		var capabilitiesErr error
 		var wg sync.WaitGroup
-		wg.Add(3)
+		wg.Add(4)
 		go func() { defer wg.Done(); zen = g.refreshZen(ctx) }()
 		go func() { defer wg.Done(); goModels = g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes) }()
+		go func() { defer wg.Done(); codexModels = g.refreshCodexModels(ctx) }()
 		go func() {
 			defer wg.Done()
 			capabilityCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -154,10 +164,10 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 		if capabilitiesErr != nil {
 			g.logger.Warn("OpenCode capability catalog refresh failed", "component", "models", "event", "capability_refresh_failed", "error", capabilitiesErr)
 		}
+		if capabilities.Protocols == nil {
+			capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}}
+		}
 		if goModels != nil {
-			if capabilities.Protocols == nil {
-				capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}}
-			}
 			if capabilities.Protocols[config.TierGo] == nil {
 				capabilities.Protocols[config.TierGo] = map[string]wire.Protocol{}
 			}
@@ -167,8 +177,21 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 				}
 			}
 		}
-		if zen != nil || goModels != nil {
-			g.catalog.ReplaceWithCapabilities(zen, goModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
+		if codexModels != nil {
+			if capabilities.Protocols == nil {
+				capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}}
+			}
+			if capabilities.Protocols[config.TierCodex] == nil {
+				capabilities.Protocols[config.TierCodex] = map[string]wire.Protocol{}
+			}
+			for _, model := range codexModels {
+				if _, ok := capabilities.Protocols[config.TierCodex][model]; !ok {
+					capabilities.Protocols[config.TierCodex][model] = wire.Responses
+				}
+			}
+		}
+		if zen != nil || goModels != nil || codexModels != nil {
+			g.catalog.ReplaceWithCapabilities(zen, goModels, codexModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
 			if ctx.Err() == nil {
 				if err := g.catalog.SaveCache(); err != nil {
 					g.logger.Warn("model catalog cache write failed", "component", "models", "event", "catalog_cache_write_failed", "error", err)
@@ -271,4 +294,78 @@ func (g *Gateway) refreshTier(ctx context.Context, base string, nodes *nodePool)
 	}
 	g.logger.Warn("model catalog refresh failed", "component", "models", "event", "refresh_failed", "upstream", config.RedactURL(base))
 	return nil
+}
+
+// refreshCodexModels lists models from the Codex backend using the same
+// node/proxy rotation as the other tiers. It returns nil when Codex is not
+// configured so the catalog keeps the previous snapshot.
+func (g *Gateway) refreshCodexModels(ctx context.Context) []string {
+	nodes := g.codexPool()
+	if nodes == nil || nodes.Len() == 0 {
+		return nil
+	}
+	base := g.codexBase()
+	cursor := nodes.Cursor()
+	for attempt := 0; attempt < g.cfg.Retry.MaxAttempts; attempt++ {
+		node := cursor.Next()
+		if node == nil {
+			return nil
+		}
+		refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		proxy := nodes.Proxy(node)
+		if proxy == nil {
+			cancel()
+			return nil
+		}
+		models, status, err := codex.FetchModels(refreshCtx, proxy.client, base, codex.Credential{AccessToken: node.key, AccountID: node.accountID})
+		g.syncProxyResult(refreshCtx, proxy, status, err)
+		cancel()
+		if err == nil {
+			nodes.MarkSuccess(node)
+			return models
+		}
+		nodes.MarkFailure(node, nil, err)
+		g.logger.Debug("codex model catalog refresh attempt failed", "component", "models", "event", "codex_refresh_attempt_failed", "upstream", config.RedactURL(base), "attempt", attempt+1, "error", err)
+	}
+	g.logger.Warn("codex model catalog refresh failed", "component", "models", "event", "codex_refresh_failed", "upstream", config.RedactURL(base))
+	return nil
+}
+
+// StartCodexTokenRefresh periodically exchanges stale stored Codex tokens
+// for fresh ones and rebuilds the node pool when the set changes. Static
+// codex_keys are left untouched; only tokens written by the login flow have
+// a refresh token and can be renewed.
+func (g *Gateway) StartCodexTokenRefresh(ctx context.Context) {
+	go func() {
+		g.refreshCodexTokens(ctx)
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				g.refreshCodexTokens(ctx)
+			}
+		}
+	}()
+}
+
+func (g *Gateway) refreshCodexTokens(ctx context.Context) {
+	client := &http.Client{Timeout: 60 * time.Second}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	_, changed, err := codex.RefreshStale(ctx, client, codex.DefaultConfig(), g.codexAuthPath)
+	if err != nil {
+		g.logger.Warn("codex token refresh failed", "component", "codex", "event", "codex_token_refresh_failed", "error", err)
+		return
+	}
+	if !changed {
+		return
+	}
+	g.logger.Info("codex tokens refreshed", "component", "codex", "event", "codex_tokens_refreshed")
+	nodes, err := newCodexNodePool(g.codexCredentials(), g.transports, time.Duration(g.cfg.Performance.FailureCooldownSeconds)*time.Second)
+	if err == nil {
+		g.codexNodes.Store(nodes)
+	}
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/httpx"
 	"zenflash-llm/internal/identity"
@@ -211,7 +212,7 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 	}
 
 	keyTiers := route.KeyTiers
-	if !route.Anonymous && len(keyTiers) == 0 && (route.Tier == config.TierZen || route.Tier == config.TierGo) {
+	if !route.Anonymous && len(keyTiers) == 0 && (route.Tier == config.TierZen || route.Tier == config.TierGo || route.Tier == config.TierCodex) {
 		keyTiers = []config.Tier{route.Tier}
 	}
 	for _, tier := range keyTiers {
@@ -550,9 +551,13 @@ func (g *Gateway) shapeKeyBody(body []byte, route models.Route, tier config.Tier
 func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, override DebugKeyOverride, attemptOffset int) (*http.Response, error, int) {
 	nodes := g.zenNodes
 	baseURL := g.cfg.Upstream.Zen
-	if override.Tier == config.TierGo {
+	switch override.Tier {
+	case config.TierGo:
 		nodes = g.goNodes
 		baseURL = g.cfg.Upstream.Go
+	case config.TierCodex:
+		nodes = g.codexPool()
+		baseURL = g.codexBase()
 	}
 	node := nodes.NodeByID(override.KeyID)
 	if node == nil {
@@ -578,7 +583,17 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 	}
 	keyID := config.KeyDisplayID(node.key)
 	setRequestCredential(ctx, override.Tier, keyID, "key", false, proxy)
-	req, err := newUpstreamRequest(ctx, baseURL, route.ProtocolFor(override.Tier), body, ids, node.key)
+	var req *http.Request
+	var err error
+	if override.Tier == config.TierCodex {
+		body = forceStreamBody(body)
+		if meta := telemetry.MetaFromContext(ctx); meta != nil {
+			meta.Shaped = true
+		}
+		req, err = codex.NewUpstreamRequest(ctx, baseURL, body, node.accountID, node.key, true)
+	} else {
+		req, err = newUpstreamRequest(ctx, baseURL, route.ProtocolFor(override.Tier), body, ids, node.key)
+	}
 	if err != nil {
 		return nil, err, 0
 	}
@@ -597,9 +612,13 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 	var lastErr error
 	nodes := g.zenNodes
 	baseURL := g.cfg.Upstream.Zen
-	if route.Tier == config.TierGo {
+	switch route.Tier {
+	case config.TierGo:
 		nodes = g.goNodes
 		baseURL = g.cfg.Upstream.Go
+	case config.TierCodex:
+		nodes = g.codexPool()
+		baseURL = g.codexBase()
 	}
 	cursor := nodes.CursorFor(ids.Session)
 	if nodes.Len() == 0 {
@@ -610,7 +629,12 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 	if len(body) == 0 {
 		return nil, fmt.Errorf("no prepared %s request body", route.Tier), 0
 	}
-	if shaped, changed := g.shapeKeyBody(body, route, route.Tier); changed {
+	if route.Tier == config.TierCodex {
+		body = forceStreamBody(body)
+		if meta := telemetry.MetaFromContext(ctx); meta != nil {
+			meta.Shaped = true
+		}
+	} else if shaped, changed := g.shapeKeyBody(body, route, route.Tier); changed {
 		body = shaped
 		if meta := telemetry.MetaFromContext(ctx); meta != nil {
 			meta.Shaped = true
@@ -640,7 +664,13 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 			httpx.DrainAndClose(lastResponse.Body)
 			lastResponse = nil
 		}
-		req, err := newUpstreamRequest(ctx, baseURL, route.Protocol, body, ids, node.key)
+		var req *http.Request
+		var err error
+		if route.Tier == config.TierCodex {
+			req, err = codex.NewUpstreamRequest(ctx, baseURL, body, node.accountID, node.key, true)
+		} else {
+			req, err = newUpstreamRequest(ctx, baseURL, route.Protocol, body, ids, node.key)
+		}
 		if err != nil {
 			return nil, err, attempts
 		}

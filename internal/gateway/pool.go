@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/httpx"
 )
@@ -259,6 +260,7 @@ func isProxyFailure(err error) bool {
 // atomically when a proxy becomes unavailable.
 type upstreamNode struct {
 	key            string
+	accountID      string
 	index          int
 	preferredProxy int
 	proxyIndex     atomic.Int64
@@ -294,6 +296,33 @@ func newNodePool(keys []string, transports *transportPool, cooldown time.Duratio
 	for i, key := range keys {
 		proxyIndex := i % len(transports.items)
 		node := &upstreamNode{key: key, index: i, preferredProxy: proxyIndex}
+		node.proxyIndex.Store(int64(proxyIndex))
+		pool.nodes = append(pool.nodes, node)
+		pool.bindingCount[proxyIndex]++
+	}
+	return pool, nil
+}
+
+// newCodexNodePool distributes Codex credentials over the shared proxy
+// transports the same way newNodePool does for static keys. Each node
+// remembers its account id so the upstream request can carry the
+// ChatGPT-Account-ID header.
+func newCodexNodePool(creds []codex.Credential, transports *transportPool, cooldown time.Duration) (*nodePool, error) {
+	if transports == nil || len(transports.items) == 0 {
+		return nil, fmt.Errorf("at least one proxy transport is required")
+	}
+	pool := &nodePool{
+		nodes:        make([]*upstreamNode, 0, len(creds)),
+		transports:   transports,
+		cooldown:     cooldown,
+		bindingCount: make([]int, len(transports.items)),
+	}
+	for i, cred := range creds {
+		if cred.AccessToken == "" {
+			continue
+		}
+		proxyIndex := i % len(transports.items)
+		node := &upstreamNode{key: cred.AccessToken, accountID: cred.AccountID, index: i, preferredProxy: proxyIndex}
 		node.proxyIndex.Store(int64(proxyIndex))
 		pool.nodes = append(pool.nodes, node)
 		pool.bindingCount[proxyIndex]++

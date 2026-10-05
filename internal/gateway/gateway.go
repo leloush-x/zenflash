@@ -12,8 +12,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/identity"
 	"zenflash-llm/internal/jsonutil"
@@ -27,17 +29,48 @@ const maxRequestBody = 32 << 20
 const anonymousZenKey = "public"
 
 type Gateway struct {
-	cfg        config.Config
-	logger     *slog.Logger
-	transports *transportPool
-	zenNodes   *nodePool
-	goNodes    *nodePool
-	anonymous  *anonymousPool
-	catalog    *models.Catalog
-	monitor    *telemetry.Monitor
+	cfg           config.Config
+	logger        *slog.Logger
+	transports    *transportPool
+	zenNodes      *nodePool
+	goNodes       *nodePool
+	anonymous     *anonymousPool
+	catalog       *models.Catalog
+	monitor       *telemetry.Monitor
+	codexAuthPath string
+	codexNodes    atomic.Pointer[nodePool]
 }
 
-func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*Gateway, error) {
+// codexPool returns the live codex node pool. The pool is rebuilt in place
+// when stored upstream tokens are refreshed, so the pointer is swapped
+// atomically.
+func (g *Gateway) codexPool() *nodePool {
+	if g == nil {
+		return nil
+	}
+	return g.codexNodes.Load()
+}
+
+// codexBase resolves the Codex upstream URL, defaulting to the public
+// backend when the operator left it empty but configured credentials.
+func (g *Gateway) codexBase() string {
+	if g.cfg.Upstream.Codex != "" {
+		return g.cfg.Upstream.Codex
+	}
+	return codex.DefaultCodexBase
+}
+
+// codexCredentials reloads the stored tokens and merges them with the
+// statically configured keys.
+func (g *Gateway) codexCredentials() []codex.Credential {
+	stored, err := codex.LoadTokens(g.codexAuthPath)
+	if err != nil {
+		g.logger.Warn("codex credential store unreadable", "component", "codex", "event", "codex_store_unreadable", "error", err)
+	}
+	return codex.Credentials(stored, g.cfg.CodexKeys)
+}
+
+func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor, configPath string) (*Gateway, error) {
 	transports, err := newTransportPool(cfg.RuntimeProxies(), cfg.Performance, cfg.Performance.AttemptTimeout(time.Duration(cfg.Retry.TimeoutSeconds)*time.Second))
 	if err != nil {
 		return nil, err
@@ -53,16 +86,27 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*G
 	}
 	catalog := models.NewCatalog(cfg.Prefer, cfg.Models.Protocols)
 	catalog.SetRefreshInterval(time.Duration(cfg.Models.RefreshSeconds) * time.Second)
-	return &Gateway{
-		cfg:        cfg,
-		logger:     logger,
-		transports: transports,
-		zenNodes:   zenNodes,
-		goNodes:    goNodes,
-		anonymous:  newAnonymousPool(cfg.Anonymous, transports, cooldown),
-		catalog:    catalog,
-		monitor:    monitor,
-	}, nil
+	g := &Gateway{
+		cfg:           cfg,
+		logger:        logger,
+		transports:    transports,
+		zenNodes:      zenNodes,
+		goNodes:       goNodes,
+		anonymous:     newAnonymousPool(cfg.Anonymous, transports, cooldown),
+		catalog:       catalog,
+		monitor:       monitor,
+		codexAuthPath: codex.AuthPath(configPath),
+	}
+	stored, err := codex.LoadTokens(g.codexAuthPath)
+	if err != nil {
+		g.logger.Warn("codex credential store unreadable", "component", "codex", "event", "codex_store_unreadable", "error", err)
+	}
+	codexNodes, err := newCodexNodePool(codex.Credentials(stored, cfg.CodexKeys), transports, cooldown)
+	if err != nil {
+		return nil, fmt.Errorf("codex node pool: %w", err)
+	}
+	g.codexNodes.Store(codexNodes)
+	return g, nil
 }
 
 func (g *Gateway) Handler() http.Handler {
@@ -131,11 +175,11 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			wire.WriteError(w, external, http.StatusBadRequest, "the model uses an upstream protocol that zenflash-llm does not expose", "invalid_request_error", "model")
 			return
 		}
-		route, err := g.catalog.Route(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.cfg.Anonymous)
+		route, err := g.catalog.Route(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.cfg.Anonymous)
 		if override, selected := debugKeyOverrideFrom(r.Context()); selected {
 			// A per-key diagnostic must not silently be served by another key,
 			// another tier or the anonymous lane.
-			route, err = g.catalog.RouteForTier(model, override.Tier, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0)
+			route, err = g.catalog.RouteForTier(model, override.Tier, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0)
 		}
 		if err != nil {
 			wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", "model")
@@ -304,7 +348,7 @@ func (g *Gateway) handleSystemOne(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, "the model uses an upstream protocol that zenflash-llm does not expose", "invalid_request_error", "model")
 		return
 	}
-	route, err := g.catalog.Route(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.cfg.Anonymous)
+	route, err := g.catalog.Route(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.cfg.Anonymous)
 	if err != nil {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, err.Error(), "invalid_request_error", "model")
 		return
@@ -420,7 +464,7 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 	tiers := make([]config.Tier, 0, len(route.KeyTiers)+1)
 	seen := make(map[config.Tier]bool, len(route.KeyTiers)+1)
 	addTier := func(tier config.Tier) {
-		if tier != config.TierZen && tier != config.TierGo || seen[tier] {
+		if (tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex) || seen[tier] {
 			return
 		}
 		seen[tier] = true
@@ -437,8 +481,11 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 	for _, tier := range tiers {
 		protocol := route.ProtocolFor(tier)
 		baseURL := g.cfg.Upstream.Zen
-		if tier == config.TierGo {
+		switch tier {
+		case config.TierGo:
 			baseURL = g.cfg.Upstream.Go
+		case config.TierCodex:
+			baseURL = g.codexBase()
 		}
 		upstreamPayload, err := wire.PrepareRequest(from, protocol, input, baseURL)
 		if err != nil {

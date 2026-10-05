@@ -148,9 +148,9 @@ func FetchCapabilities(ctx context.Context, client *http.Client, endpoint string
 		return Capabilities{}, err
 	}
 	result := Capabilities{
-		Protocols:   map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}},
-		Unsupported: map[config.Tier]map[string]bool{config.TierZen: {}, config.TierGo: {}},
-		Metadata:    map[config.Tier]map[string]Metadata{config.TierZen: {}, config.TierGo: {}},
+		Protocols:   allTierProtocolMaps(),
+		Unsupported: allTierBoolMaps(),
+		Metadata:    allTierMetaMaps(),
 	}
 	for providerID, provider := range providers {
 		tier, ok := capabilityTier(providerID, provider.API)

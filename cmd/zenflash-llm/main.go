@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,16 +16,35 @@ import (
 	adminui "zenflash-llm/internal/admin"
 	"zenflash-llm/internal/buildinfo"
 	"zenflash-llm/internal/cline/app"
+	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/gateway"
 	"zenflash-llm/internal/telemetry"
 )
+
+// codexLogin runs the ChatGPT device-code flow and saves the resulting
+// refreshable credentials beside the config file.
+func codexLogin(configPath string, out io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 16*time.Minute)
+	defer cancel()
+	return codex.AuthenticateDevice(ctx, nil, codex.DefaultConfig(), codex.AuthPath(configPath), out)
+}
 
 // version remains the linker injection point used by release builds.
 var version = "dev"
 
 func main() {
 	buildinfo.Version = version
+	if len(os.Args) > 1 && os.Args[1] == "login" {
+		fs := flag.NewFlagSet("login", flag.ExitOnError)
+		configPath := fs.String("config", "config.json", "path to config.json")
+		_ = fs.Parse(os.Args[2:])
+		if err := codexLogin(*configPath, os.Stdout); err != nil {
+			slog.Error("codex sign-in failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	configPath := flag.String("config", "config.json", "path to config.json")
 	listen := flag.String("listen", "", "override the configured API listen address")
 	webListen := flag.String("web-listen", "", "override the configured WebUI listen address")

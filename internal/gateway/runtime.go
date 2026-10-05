@@ -102,7 +102,7 @@ func NewRuntimeManager(root context.Context, configPath string, cfg config.Confi
 }
 
 func (m *RuntimeManager) build(cfg config.Config) (*gatewayRuntime, error) {
-	gateway, err := New(cfg, m.logger, m.monitor)
+	gateway, err := New(cfg, m.logger, m.monitor, m.configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +118,7 @@ func (m *RuntimeManager) start(runtime *gatewayRuntime) {
 	runtime.cancel = cancel
 	runtime.gateway.StartProxyHealthChecks(runtimeCtx)
 	runtime.gateway.StartModelRefresh(runtimeCtx)
+	runtime.gateway.StartCodexTokenRefresh(runtimeCtx)
 }
 
 func (m *RuntimeManager) Handler() http.Handler {
@@ -260,6 +261,7 @@ type ProxyStatus struct {
 	Checking  bool   `json:"checking"`
 	ZenKeys   int    `json:"zen_keys"`
 	GoKeys    int    `json:"go_keys"`
+	CodexKeys int    `json:"codex_keys"`
 	Anonymous bool   `json:"anonymous"`
 }
 
@@ -274,12 +276,21 @@ func (m *RuntimeManager) Resources() ResourceSnapshot {
 	result.Metadata = gateway.catalog.MetadataSnapshot()
 	result.Keys = append(result.Keys, keyStatuses("zen", gateway.zenNodes)...)
 	result.Keys = append(result.Keys, keyStatuses("go", gateway.goNodes)...)
+	if codexPool := gateway.codexPool(); codexPool != nil {
+		result.Keys = append(result.Keys, keyStatuses("codex", codexPool)...)
+	}
 	gateway.zenNodes.bindingsMu.Lock()
 	zenBindings := append([]int(nil), gateway.zenNodes.bindingCount...)
 	gateway.zenNodes.bindingsMu.Unlock()
 	gateway.goNodes.bindingsMu.Lock()
 	goBindings := append([]int(nil), gateway.goNodes.bindingCount...)
 	gateway.goNodes.bindingsMu.Unlock()
+	var codexBindings []int
+	if codexPool := gateway.codexPool(); codexPool != nil {
+		codexPool.bindingsMu.Lock()
+		codexBindings = append([]int(nil), codexPool.bindingCount...)
+		codexPool.bindingsMu.Unlock()
+	}
 	for _, proxy := range gateway.transports.items {
 		status := ProxyStatus{Index: proxy.index, Address: config.RedactURL(proxy.name), Healthy: proxy.healthy.Load(), Checking: proxy.checking.Load(), Anonymous: gateway.cfg.Anonymous}
 		if proxy.index < len(zenBindings) {
@@ -287,6 +298,9 @@ func (m *RuntimeManager) Resources() ResourceSnapshot {
 		}
 		if proxy.index < len(goBindings) {
 			status.GoKeys = goBindings[proxy.index]
+		}
+		if proxy.index < len(codexBindings) {
+			status.CodexKeys = codexBindings[proxy.index]
 		}
 		result.Proxies = append(result.Proxies, status)
 	}
@@ -302,7 +316,7 @@ func (m *RuntimeManager) DebugModels() ([]modelcatalog.RouteDiagnostic, modelcat
 	models := gateway.catalog.List()
 	result := make([]modelcatalog.RouteDiagnostic, 0, len(models))
 	for _, model := range models {
-		result = append(result, gateway.catalog.Diagnostic(model, "", len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.cfg.Anonymous))
+		result = append(result, gateway.catalog.Diagnostic(model, "", len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.cfg.Anonymous))
 	}
 	metadata := gateway.catalog.MetadataSnapshot()
 	return result, metadata
@@ -314,7 +328,7 @@ func (m *RuntimeManager) DebugRoute(model string, requested protocol.Protocol) m
 		return modelcatalog.RouteDiagnostic{Model: model, RequestedProtocol: requested, RouteError: "gateway runtime is unavailable"}
 	}
 	gateway := runtime.gateway
-	return gateway.catalog.Diagnostic(model, requested, len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.cfg.Anonymous)
+	return gateway.catalog.Diagnostic(model, requested, len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.cfg.Anonymous)
 }
 
 // DebugKeyView is the operator-facing view of one configured upstream key. It
@@ -331,7 +345,7 @@ type DebugKeyView struct {
 // DebugKeys lists every configured upstream key per tier so the Playground can
 // offer an explicit per-key test target.
 func (m *RuntimeManager) DebugKeys() map[string][]DebugKeyView {
-	result := map[string][]DebugKeyView{"zen": {}, "go": {}}
+	result := map[string][]DebugKeyView{"zen": {}, "go": {}, "codex": {}}
 	runtime := m.current.Load()
 	if runtime == nil {
 		return result
@@ -351,6 +365,7 @@ func (m *RuntimeManager) DebugKeys() map[string][]DebugKeyView {
 	}
 	appendKeys(config.TierZen, runtime.gateway.zenNodes.nodes)
 	appendKeys(config.TierGo, runtime.gateway.goNodes.nodes)
+	appendKeys(config.TierCodex, runtime.gateway.codexPool().nodes)
 	return result
 }
 
@@ -371,9 +386,9 @@ func (m *RuntimeManager) DebugRouteForTier(model string, tier config.Tier) (mode
 		return modelcatalog.RouteDiagnostic{Model: model, RouteError: "gateway runtime is unavailable"}, fmt.Errorf("gateway runtime is unavailable")
 	}
 	gateway := runtime.gateway
-	hasZen, hasGo := len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0
-	diagnostic := gateway.catalog.Diagnostic(model, "", hasZen, hasGo, false)
-	route, err := gateway.catalog.RouteForTier(model, tier, hasZen, hasGo)
+	hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0
+	diagnostic := gateway.catalog.Diagnostic(model, "", hasZen, hasGo, hasCodex, false)
+	route, err := gateway.catalog.RouteForTier(model, tier, hasZen, hasGo, hasCodex)
 	if err != nil {
 		diagnostic.RouteError = err.Error()
 		return diagnostic, err
