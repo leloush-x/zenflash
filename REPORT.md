@@ -29,8 +29,8 @@ Model IDs come from configured upstream `/v1/models` endpoints. Protocol/capabil
 
 The canonical keys are in `config.example.json` and `internal/config/config.go`:
 
-- `listen`, `server_keys`, `zen_keys`, `go_keys`, `anonymous`
-- `proxies`, `proxyfile`, `upstream.zen`, `upstream.go`
+- `listen`, `server_keys`, `zen_keys`, `go_keys`, `codex_keys`, `anonymous`
+- `proxies`, `proxyfile`, `upstream.zen`, `upstream.go`, `upstream.codex`
 - `retry.max_attempts`, `retry.timeout_seconds`
 - `models.refresh_seconds`, `models.protocols`
 - `performance.max_idle_conns`, `max_idle_conns_per_host`, `max_conns_per_host`, `idle_conn_timeout_seconds`, `connect_timeout_seconds`, `failure_cooldown_seconds`, `attempt_timeout_seconds`
@@ -38,7 +38,7 @@ The canonical keys are in `config.example.json` and `internal/config/config.go`:
 - `webui.enabled`, `webui.listen`, `webui.username`, `webui.password`, `webui.password_hash`, `webui.session_ttl_minutes`
 - `prefer`, `reasoning.effort`, `reasoning.effort_by_model`
 
-CLI flags: `-config` (default `config.json`), `-listen`, `-web-listen`, `-version`, `-cline-host` (default `127.0.0.1`), and `-cline-port` (default `3457`; zero disables Cline). `WEBUI_USERNAME` and `WEBUI_PASSWORD` override the corresponding settings. No `config.json` is checked in; `config.example.json` is the template.
+CLI flags: `-config` (default `config.json`), `-listen`, `-web-listen`, `-version`, `-cline-host` (default `127.0.0.1`), and `-cline-port` (default `3457`; zero disables Cline). The `login` subcommand (`zenflash-llm login -config config.json`) runs the ChatGPT device-code sign-in and saves refreshable Codex credentials to `<config>.codex-auth.json`. `WEBUI_USERNAME` and `WEBUI_PASSWORD` override the corresponding settings. No `config.json` is checked in; `config.example.json` is the template.
 
 ## Known risks
 
