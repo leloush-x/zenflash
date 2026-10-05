@@ -351,7 +351,29 @@ func (s *Service) postForm(ctx context.Context, endpoint string, form url.Values
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(b))
+		var oauthErr struct {
+			Error       string `json:"error"`
+			Description string `json:"error_description"`
+		}
+		if json.Unmarshal(b, &oauthErr) == nil {
+			if oauthErr.Description != "" {
+				return fmt.Errorf("token endpoint returned HTTP %d: %s", resp.StatusCode, oauthErr.Description)
+			}
+			if oauthErr.Error != "" {
+				return fmt.Errorf("token endpoint returned HTTP %d: %s", resp.StatusCode, oauthErr.Error)
+			}
+		}
+		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
+			return fmt.Errorf("token endpoint returned HTTP %d with an HTML error page", resp.StatusCode)
+		}
+		body := strings.TrimSpace(string(b))
+		if len(body) > 300 {
+			body = body[:300]
+		}
+		if body == "" {
+			return fmt.Errorf("token endpoint returned HTTP %d", resp.StatusCode)
+		}
+		return fmt.Errorf("token endpoint returned HTTP %d: %s", resp.StatusCode, body)
 	}
 	return json.Unmarshal(b, dst)
 }

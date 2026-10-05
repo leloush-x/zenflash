@@ -30,7 +30,10 @@ func (a *Server) handleCodexLoginComplete(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	account, err := a.codex.CompleteLogin(ctx, req.CallbackURL)
 	if err != nil {
-		writeAdminError(w, http.StatusBadGateway, "codex_login_failed", err.Error())
+		// Cloudflare turns upstream 502 responses into its own HTML error page,
+		// hiding the useful OAuth error from the admin UI. This is a failed
+		// callback submission, so return the diagnostic as a normal client error.
+		writeAdminError(w, http.StatusUnprocessableEntity, "codex_login_failed", err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "connected", "account": account})
