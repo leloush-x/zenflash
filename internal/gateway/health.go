@@ -120,7 +120,7 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (g *Gateway) availableModels() ([]modelcatalog.Route, modelcatalog.CatalogSnapshot) {
-	return g.catalog.AvailableModelsWithAntigravity(g.zenNodes.Len() > 0, g.goNodes.Len() > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+	return g.catalog.AvailableModelsWithAntigravity(g.zenNodes.Len() > 0, g.goNodes.Len() > 0 && g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 }
 
 func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -237,16 +237,23 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 		// cline/<id> so clients can pin a provider. The bare ID is kept for
 		// backward compatibility and follows prefer-order routing.
 		tiers := g.catalog.TiersForModel(model)
-		hasZen, hasGo := false, false
+		hasZen, hasGoCatalog := false, false
 		for _, tr := range tiers {
 			if tr == config.TierZen {
 				hasZen = true
 			} else if tr == config.TierGo {
-				hasGo = true
+				hasGoCatalog = true
 			}
 		}
-		if hasZen && hasGo {
-			for _, aliasTier := range []config.Tier{config.TierZen, config.TierGo} {
+		if hasZen && hasGoCatalog {
+			aliasTiers := make([]config.Tier, 0, 2)
+			if g.zenNodes.Len() > 0 || g.cfg.Anonymous {
+				aliasTiers = append(aliasTiers, config.TierZen)
+			}
+			if g.goNodes.Len() > 0 && g.hasGoKeys() {
+				aliasTiers = append(aliasTiers, config.TierGo)
+			}
+			for _, aliasTier := range aliasTiers {
 				amd := g.catalog.MetadataForTier(model, aliasTier)
 				amdMap := map[string]any{}
 				if amd.ContextWindow > 0 {

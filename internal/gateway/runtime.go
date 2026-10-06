@@ -31,18 +31,19 @@ type ApplyResult struct {
 }
 
 type RuntimeManager struct {
-	configPath string
-	root       context.Context
-	logger     *slog.Logger
-	monitor    *telemetry.Monitor
-	hub        *telemetry.LogHub
-	redactor   *config.SecretRedactor
-	level      *slog.LevelVar
-	current    atomic.Pointer[gatewayRuntime]
-	updateMu   sync.Mutex
-	effective  effectiveListeners
-	metadata   *modelcatalog.PricingStore
-	keyStore   *store.Store
+	configPath            string
+	root                  context.Context
+	logger                *slog.Logger
+	monitor               *telemetry.Monitor
+	hub                   *telemetry.LogHub
+	redactor              *config.SecretRedactor
+	level                 *slog.LevelVar
+	current               atomic.Pointer[gatewayRuntime]
+	updateMu              sync.Mutex
+	effective             effectiveListeners
+	metadata              *modelcatalog.PricingStore
+	keyStore              *store.Store
+	goAccountAvailability func() bool
 }
 
 type effectiveListeners struct {
@@ -109,6 +110,7 @@ func (m *RuntimeManager) build(cfg config.Config) (*gatewayRuntime, error) {
 		return nil, err
 	}
 	gateway.SetKeyStore(m.keyStore)
+	gateway.SetGoAccountAvailabilityProvider(m.goAccountAvailability)
 	gateway.catalog.SetPricingStore(m.metadata)
 	gateway.catalog.SetCachePath(modelcatalog.CatalogCachePath(m.configPath))
 	return &gatewayRuntime{config: cfg, gateway: gateway, handler: gateway.Handler(), cancel: func() {}}, nil
@@ -122,6 +124,20 @@ func (m *RuntimeManager) SetStore(s *store.Store) {
 	m.keyStore = s
 	if rt := m.current.Load(); rt != nil && rt.gateway != nil {
 		rt.gateway.SetKeyStore(s)
+	}
+}
+
+// SetGoAccountAvailabilityProvider prevents the embedded Cline adapter from
+// being treated as a usable fallback while its account pool is empty.
+func (m *RuntimeManager) SetGoAccountAvailabilityProvider(provider func() bool) {
+	if m == nil {
+		return
+	}
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+	m.goAccountAvailability = provider
+	if runtime := m.current.Load(); runtime != nil && runtime.gateway != nil {
+		runtime.gateway.SetGoAccountAvailabilityProvider(provider)
 	}
 }
 
@@ -344,7 +360,7 @@ func (m *RuntimeManager) DebugModels() ([]modelcatalog.RouteDiagnostic, modelcat
 	models := gateway.catalog.List()
 	result := make([]modelcatalog.RouteDiagnostic, 0, len(models))
 	for _, model := range models {
-		result = append(result, gateway.catalog.DiagnosticWithAntigravity(model, "", len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous))
+		result = append(result, gateway.catalog.DiagnosticWithAntigravity(model, "", len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys(), gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous))
 		tiers := gateway.catalog.TiersForModel(model)
 		hasZen, hasGo := false, false
 		for _, tier := range tiers {
@@ -369,7 +385,7 @@ func (m *RuntimeManager) DebugRoute(model string, requested protocol.Protocol) m
 	}
 	gateway := runtime.gateway
 	if raw, tier, ok := modelcatalog.SplitTierPrefix(model); ok {
-		hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0
+		hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys(), gateway.codexPool().Len() > 0
 		hasAntigravity := gateway.antigravityPool().Len() > 0
 		diag := gateway.catalog.DiagnosticWithAntigravity(raw, requested, hasZen, hasGo, hasCodex, hasAntigravity, gateway.cfg.Anonymous)
 		diag.Model = model
@@ -383,7 +399,7 @@ func (m *RuntimeManager) DebugRoute(model string, requested protocol.Protocol) m
 		}
 		return diag
 	}
-	return gateway.catalog.DiagnosticWithAntigravity(model, requested, len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous)
+	return gateway.catalog.DiagnosticWithAntigravity(model, requested, len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys(), gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous)
 }
 
 // DebugKeyView is the operator-facing view of one configured upstream key. It
@@ -442,7 +458,7 @@ func (m *RuntimeManager) DebugRouteForTier(model string, tier config.Tier) (mode
 		return modelcatalog.RouteDiagnostic{Model: model, RouteError: "gateway runtime is unavailable"}, fmt.Errorf("gateway runtime is unavailable")
 	}
 	gateway := runtime.gateway
-	hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0
+	hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys(), gateway.codexPool().Len() > 0
 	hasAntigravity := gateway.antigravityPool().Len() > 0
 	diagnostic := gateway.catalog.DiagnosticWithAntigravity(model, "", hasZen, hasGo, hasCodex, hasAntigravity, false)
 	route, err := gateway.catalog.RouteForTierWithAntigravity(model, tier, hasZen, hasGo, hasCodex, hasAntigravity)

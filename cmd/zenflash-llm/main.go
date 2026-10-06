@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -157,6 +160,9 @@ func main() {
 		logger.Error("failed to initialize runtime", "component", "runtime", "event", "runtime_initialization_failed", "error", err)
 		os.Exit(1)
 	}
+	if *clinePort != 0 && sameHTTPService(manager.Config().Upstream.Go, clineURL) {
+		manager.SetGoAccountAvailabilityProvider(app.HasActiveClineAccount)
+	}
 	defer manager.Shutdown()
 
 	servers := []*http.Server{}
@@ -194,6 +200,26 @@ func main() {
 			logger.Error("graceful shutdown failed", "component", "server", "event", "shutdown_failed", "address", server.Addr, "error", err)
 		}
 	}
+}
+
+func sameHTTPService(left, right string) bool {
+	a, errA := url.Parse(strings.TrimSpace(left))
+	b, errB := url.Parse(strings.TrimSpace(right))
+	if errA != nil || errB != nil || a.Scheme != b.Scheme || a.Port() != b.Port() || strings.TrimRight(a.Path, "/") != strings.TrimRight(b.Path, "/") {
+		return false
+	}
+	hostA, hostB := strings.ToLower(a.Hostname()), strings.ToLower(b.Hostname())
+	if hostA == hostB {
+		return true
+	}
+	loopback := func(host string) bool {
+		if host == "localhost" {
+			return true
+		}
+		ip := net.ParseIP(host)
+		return ip != nil && ip.IsLoopback()
+	}
+	return loopback(hostA) && loopback(hostB)
 }
 
 func serveHTTP(cancel context.CancelFunc, logger *slog.Logger, server *http.Server, component string) {

@@ -70,6 +70,12 @@ func hasActiveClineAccount() bool {
 	return false
 }
 
+// HasActiveClineAccount reports whether the embedded Cline pool can serve an
+// authenticated Go-tier request.
+func HasActiveClineAccount() bool {
+	return hasActiveClineAccount()
+}
+
 // setDefaultModel 持久化默认模型：更新内存全局并写入账号池文件
 func setDefaultModel(modelID string) {
 	initModelsCache()

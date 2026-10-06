@@ -44,6 +44,32 @@ type Gateway struct {
 	antigravityAuthPath string
 	antigravityNodes    atomic.Pointer[nodePool]
 	keyStore            *store.Store
+	goAccountProvider   atomic.Pointer[goAccountAvailability]
+}
+
+type goAccountAvailability struct {
+	available func() bool
+}
+
+// SetGoAccountAvailabilityProvider distinguishes configured placeholder Go
+// credentials from an actual account in the embedded Cline pool.
+func (g *Gateway) SetGoAccountAvailabilityProvider(provider func() bool) {
+	if g == nil {
+		return
+	}
+	if provider == nil {
+		g.goAccountProvider.Store(nil)
+		return
+	}
+	g.goAccountProvider.Store(&goAccountAvailability{available: provider})
+}
+
+func (g *Gateway) hasGoKeys() bool {
+	if g == nil || len(g.cfg.GoKeys) == 0 {
+		return false
+	}
+	provider := g.goAccountProvider.Load()
+	return provider == nil || provider.available == nil || provider.available()
 }
 
 // codexPool returns the live codex node pool. The pool is rebuilt in place
@@ -226,9 +252,9 @@ func (g *Gateway) authenticate(next http.HandlerFunc) http.HandlerFunc {
 func (g *Gateway) resolveRoute(model string) (models.Route, error) {
 	raw, tier, ok := models.SplitTierPrefix(model)
 	if !ok {
-		return g.catalog.RouteWithAntigravity(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+		return g.catalog.RouteWithAntigravity(model, len(g.cfg.ZenKeys) > 0, g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 	}
-	return g.catalog.RoutePinned(raw, tier, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+	return g.catalog.RoutePinned(raw, tier, len(g.cfg.ZenKeys) > 0, g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 }
 
 func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
@@ -260,7 +286,7 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 		if override, selected := debugKeyOverrideFrom(r.Context()); selected {
 			// A per-key diagnostic must not silently be served by another key,
 			// another tier or the anonymous lane.
-			route, err = g.catalog.RouteForTierWithAntigravity(model, override.Tier, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0)
+			route, err = g.catalog.RouteForTierWithAntigravity(model, override.Tier, len(g.cfg.ZenKeys) > 0, g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0)
 		}
 		if err != nil {
 			wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", "model")
