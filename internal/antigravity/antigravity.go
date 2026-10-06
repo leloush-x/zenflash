@@ -930,6 +930,15 @@ func BuildGenerateRequest(chatBody []byte, model, project string) ([]byte, strin
 	return data, wire, err
 }
 
+
+// isUserProjectPermissionError reports whether a generateContent 403 is about
+// the x-goog-user-project billing project rather than the request itself.
+func isUserProjectPermissionError(body []byte) bool {
+	lower := strings.ToLower(string(body))
+	return strings.Contains(lower, "serviceusage") ||
+		(strings.Contains(lower, "required permission") && strings.Contains(lower, "project"))
+}
+
 // ExecuteGenerate posts one non-stream generateContent and returns a synthetic
 // Chat JSON http.Response so the gateway's Chat conversion path can be reused.
 func ExecuteGenerate(ctx context.Context, client *http.Client, base, project, bearer, wireModel string, envelope []byte) (*http.Response, error) {
@@ -944,13 +953,37 @@ func ExecuteGenerate(ctx context.Context, client *http.Client, base, project, be
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", UserAgent())
-	req.Header.Set("x-goog-user-project", project)
+	if strings.TrimSpace(project) != "" {
+		req.Header.Set("x-goog-user-project", project)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	_ = resp.Body.Close()
+	// Like codex2api: a 403 caused by the billing/quota project header
+	// (missing serviceusage permission) is retried once without the header
+	// so accounts that work project-less still serve instead of hard failing.
+	if resp.StatusCode == http.StatusForbidden && strings.TrimSpace(project) != "" && isUserProjectPermissionError(body) {
+		retry, rerr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(envelope))
+		if rerr == nil {
+			retry.Header.Set("Authorization", "Bearer "+bearer)
+			retry.Header.Set("Content-Type", "application/json")
+			retry.Header.Set("User-Agent", UserAgent())
+			if rresp, derr := client.Do(retry); derr == nil {
+				rbody, _ := io.ReadAll(io.LimitReader(rresp.Body, 8<<20))
+				_ = rresp.Body.Close()
+				if rresp.StatusCode/100 == 2 {
+					resp = rresp
+					body = rbody
+				} else {
+					// Keep the original permission error: it names the fix.
+					_ = rresp.Body.Close()
+				}
+			}
+		}
+	}
 	if resp.StatusCode/100 != 2 {
 		return &http.Response{StatusCode: resp.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, nil
 	}
@@ -967,6 +1000,7 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 			Content *struct {
 				Parts []struct {
 					Text         string `json:"text"`
+					Thought      bool   `json:"thought"`
 					FunctionCall *struct {
 						Name string         `json:"name"`
 						Args map[string]any `json:"args"`
@@ -984,6 +1018,17 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 	if err := json.Unmarshal(body, &r); err != nil {
 		return nil, err
 	}
+	// Daily endpoint wraps the payload as {"response": {...}, "traceId": ...}.
+	if len(r.Candidates) == 0 && r.UsageMetadata == nil {
+		var wrapped struct {
+			Response json.RawMessage `json:"response"`
+		}
+		if json.Unmarshal(body, &wrapped) == nil && len(wrapped.Response) > 0 {
+			if err := json.Unmarshal(wrapped.Response, &r); err != nil {
+				return nil, err
+			}
+		}
+	}
 	text := []string{}
 	toolCalls := []any{}
 	for _, c := range r.Candidates {
@@ -991,6 +1036,9 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 			continue
 		}
 		for _, p := range c.Content.Parts {
+			if p.Thought {
+				continue
+			}
 			if p.Text != "" {
 				text = append(text, p.Text)
 			}
