@@ -307,7 +307,15 @@ func (a *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, http.StatusServiceUnavailable, "catalog_unavailable", "no local server key is configured")
 		return
 	}
-	request, err := http.NewRequest(http.MethodGet, "http://gateway.local/v1/models", nil)
+	// Dashboard catalogue defaults to free-tier only; ?all=1 shows everything.
+	// (?free=1 is also honored explicitly.) The machine /v1/models default
+	// stays complete so Codex/Antigravity routes keep working.
+	q := r.URL.Query()
+	if q.Get("all") != "1" && q.Get("free") != "1" {
+		q.Set("free", "1")
+	}
+	uri := "http://gateway.local/v1/models?" + q.Encode()
+	request, err := http.NewRequest(http.MethodGet, uri, nil)
 	if err != nil {
 		writeAdminError(w, http.StatusInternalServerError, "catalog_failed", err.Error())
 		return
@@ -316,8 +324,9 @@ func (a *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 	recorder := newDebugResponseRecorder()
 	a.manager.Handler().ServeHTTP(recorder, request)
 	// Merge Service Codex models (same as WrapAPI does for public /v1/models)
-	// so the catalogue shows logged-in Codex accounts.
-	if recorder.status >= 200 && recorder.status < 300 && a.codex != nil {
+	// so the catalogue shows logged-in Codex accounts. Skipped for the
+	// default free-tier view since Codex accounts are not free-tier.
+	if recorder.status >= 200 && recorder.status < 300 && a.codex != nil && q.Get("all") == "1" {
 		var listing map[string]any
 		if json.Unmarshal(recorder.body.Bytes(), &listing) == nil {
 			data, _ := listing["data"].([]any)

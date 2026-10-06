@@ -146,6 +146,17 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	now := time.Now().Unix()
 	routes, _ := g.availableModels()
+	// Free-tier view: ?free=1 keeps only anonymous-eligible free models so
+	// clients that only want the free tier see a clean catalogue.
+	if r != nil && (r.URL.Query().Get("free") == "1" || r.URL.Query().Get("free") == "true") {
+		kept := routes[:0]
+		for _, route := range routes {
+			if g.catalog.IsFreeModel(route.ID) {
+				kept = append(kept, route)
+			}
+		}
+		routes = kept
+	}
 	data := make([]map[string]any, 0, len(routes))
 	for _, route := range routes {
 		model := route.ID
