@@ -546,7 +546,7 @@ func (s *Service) ProxyResponses(w http.ResponseWriter, r *http.Request, model s
 			wire.WriteError(w, external, http.StatusBadGateway, "failed to read streamed response", "upstream_error", "")
 			return
 		}
-		completed, input, output := completedResponse(streamBody)
+	completed, input, output := completedResponse(streamBody)
 		if len(completed) == 0 {
 			wire.WriteError(w, external, http.StatusBadGateway, "OpenAI stream ended without response.completed", "upstream_error", "")
 			return
@@ -635,15 +635,25 @@ func (s *Service) ModelAccountCount(model string) int {
 func completedResponse(body []byte) ([]byte, uint64, uint64) {
 	var result json.RawMessage
 	var in, out uint64
+	var deltaText strings.Builder
 	for _, line := range strings.Split(string(body), "\n") {
 		if !strings.HasPrefix(line, "data: ") {
 			continue
+		}
+		raw := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+		// Deltas carry the answer even when the final snapshot is empty.
+		var delta struct {
+			Type  string `json:"type"`
+			Delta string `json:"delta"`
+		}
+		if json.Unmarshal([]byte(raw), &delta) == nil && delta.Type == "response.output_text.delta" {
+			deltaText.WriteString(delta.Delta)
 		}
 		var event struct {
 			Type     string          `json:"type"`
 			Response json.RawMessage `json:"response"`
 		}
-		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &event) != nil || event.Type != "response.completed" {
+		if json.Unmarshal([]byte(raw), &event) != nil || event.Type != "response.completed" {
 			continue
 		}
 		result = event.Response
@@ -656,7 +666,60 @@ func completedResponse(body []byte) ([]byte, uint64, uint64) {
 		_ = json.Unmarshal(result, &usage)
 		in, out = usage.Usage.Input, usage.Usage.Output
 	}
+	// Upstream sometimes snapshots an empty output list on the completed
+	// event while the deltas carried the real text. Backfill from deltas so
+	// non-stream clients do not receive an empty reply.
+	if dt := deltaText.String(); dt != "" && !completedHasText(result) {
+		result = completedWithDeltaText(result, dt)
+	}
 	return result, in, out
+}
+
+// completedHasText reports whether a completed response snapshot already
+// carries message text or tool calls.
+func completedHasText(result json.RawMessage) bool {
+	var v struct {
+		Output []struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			Name string `json:"name"`
+		} `json:"output"`
+	}
+	if json.Unmarshal(result, &v) != nil {
+		return true
+	}
+	for _, o := range v.Output {
+		if o.Type == "function_call" && strings.TrimSpace(o.Name) != "" {
+			return true
+		}
+		for _, b := range o.Content {
+			if strings.TrimSpace(b.Text) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// completedWithDeltaText injects one assistant message built from streamed
+// deltas into an empty completed snapshot.
+func completedWithDeltaText(result json.RawMessage, text string) json.RawMessage {
+	var v map[string]any
+	if json.Unmarshal(result, &v) != nil || v == nil {
+		v = map[string]any{}
+	}
+	out, _ := v["output"].([]any)
+	out = append(out, map[string]any{
+		"type": "message", "role": "assistant", "status": "completed",
+		"content": []any{map[string]any{"type": "output_text", "text": text}},
+	})
+	v["output"] = out
+	if raw, err := json.Marshal(v); err == nil {
+		return raw
+	}
+	return result
 }
 
 func (s *Service) recordUsage(accountID string, input, output uint64) {
