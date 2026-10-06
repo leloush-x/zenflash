@@ -99,6 +99,12 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	codexService, err := codex.New(*configPath + ".codex.enc")
+	if err != nil {
+		slog.Error("failed to initialize Codex account store", "error", err)
+		os.Exit(1)
+	}
+	codexService.Start(ctx, 10*time.Minute)
 	level := new(slog.LevelVar)
 	telemetry.SetLogLevel(level, cfg.Logging.Level)
 	hub := telemetry.NewLogHub(cfg.Logging.RingSize)
@@ -130,7 +136,7 @@ func main() {
 	servers := []*http.Server{}
 	var apiHandler http.Handler = manager.Handler()
 	if cfg.WebUI.Enabled {
-		admin := adminui.New(manager, monitor, hub, logger, *configPath+".sessions.json", clineURL)
+		admin := adminui.New(manager, monitor, hub, logger, *configPath+".sessions.json", clineURL, codexService)
 		root := http.NewServeMux()
 		root.Handle("/v1/", manager.Handler())
 		root.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +152,7 @@ func main() {
 			go serveHTTP(cancel, logger, webServer, "webui")
 		}
 	}
+	apiHandler = codexService.WrapAPI(apiHandler, func() []string { return manager.Config().ServerKeys })
 	apiServer := &http.Server{
 		Addr: cfg.Listen, Handler: apiHandler, ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
 	}
