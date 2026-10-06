@@ -132,6 +132,8 @@ func main() {
 			if _, ierr := durable.ImportOnce(ctx, *configPath, rawCfg); ierr != nil {
 				logger.Warn("postgres import skipped", "error", ierr)
 			}
+			durable.SyncFiles(ctx, *configPath)
+			durable.StartFileSync(ctx, *configPath)
 		}
 	}
 	clineURL := ""
