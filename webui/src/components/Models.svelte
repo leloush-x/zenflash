@@ -35,7 +35,7 @@
 
   onMount(load);
 
-  let freeOnly = $state(true);
+
   const all = $derived(data?.models ?? []);
   const freeCount = $derived(all.filter((m: any) => m.anonymous_eligibility?.allowed).length);
   const agCount = $derived(all.filter((m: any) => m.available_antigravity).length);
@@ -45,7 +45,8 @@
   const visible = $derived(
     all.filter(
       (m: any) =>
-        (freeOnly ? m.anonymous_eligibility?.allowed : usable(m)) &&
+        usable(m) &&
+        !m.route_error &&
         (!modelFilter.trim() || m.model.toLowerCase().includes(modelFilter.trim().toLowerCase())),
     ),
   );
@@ -56,9 +57,7 @@
 <div class="fade-up flex flex-wrap items-center gap-2">
   <div class="eyebrow !mb-0">usable · {visible.length} / {all.length} · free {freeCount} · mine {mineCount}</div>
   <span class="grow"></span>
-  <label class="flex items-center gap-1.5 text-[12px] text-[color:var(--color-dim)]">
-    <input type="checkbox" bind:checked={freeOnly} /> free only
-  </label>
+
   <input class="w-full sm:w-56" placeholder="filter models…" bind:value={modelFilter} />
   <button class="btn-ghost" onclick={load}>refresh cached</button>
   <button class="btn-ghost" onclick={refreshLive} disabled={refreshing}>{refreshing ? "updating…" : "refresh live"}</button>
