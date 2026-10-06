@@ -66,7 +66,7 @@
     } catch (e) { flash(String(e)); }
   }
 
-  onMount(() => { load(); loadAccounts(); });
+  onMount(() => { load(); loadAccounts(); loadOAuthAccounts(); });
   let clineTimer: any;
   async function startCline() {
     clineBusy = true;
@@ -120,6 +120,62 @@
       else flash("account rejected: " + (r?.error ?? JSON.stringify(r).slice(0, 120)));
     } catch (e) { flash(`account import failed: ${e}`); }
     finally { accountBusy = false; }
+  }
+
+  // codex + antigravity oauth accounts (paste refresh token, validated server side)
+  let oauthAccounts = $state<any[]>([]);
+  let oauthLoading = $state(false);
+  let codexToken = $state("");
+  let antigravityToken = $state("");
+  let oauthBusy = $state("");
+
+  const codexAccounts = $derived(oauthAccounts.filter((a) => a.provider === "codex"));
+  const antigravityAccounts = $derived(oauthAccounts.filter((a) => a.provider === "antigravity"));
+
+  async function loadOAuthAccounts() {
+    oauthLoading = true;
+    try {
+      const r = await api<any>("/api/oauth/accounts");
+      oauthAccounts = r?.accounts ?? [];
+    } catch { oauthAccounts = []; }
+    finally { oauthLoading = false; }
+  }
+
+  async function importOAuthToken(provider: string) {
+    const value = (provider === "codex" ? codexToken : antigravityToken).trim();
+    if (!value) return;
+    oauthBusy = provider;
+    try {
+      const r = await post<any>(`/api/${provider}/accounts/import`, { refresh_token: value });
+      if (r?.account) {
+        flash(`${provider} account connected as ${r.account.email || r.account.id}`);
+        if (provider === "codex") codexToken = "";
+        else antigravityToken = "";
+        oauthAccounts = r?.accounts ?? oauthAccounts;
+      } else flash(`${provider} rejected: ` + JSON.stringify(r?.error ?? r).slice(0, 140));
+    } catch (e) { flash(`${provider} import failed: ${e}`); }
+    finally { oauthBusy = ""; }
+  }
+
+  async function removeOAuthAccount(provider: string, id: string) {
+    if (!confirm(`Remove this ${provider} account?`)) return;
+    oauthBusy = provider + ":" + id;
+    try {
+      const r = await post<any>(`/api/${provider}/accounts/delete`, { id });
+      if (r?.removed) { flash(`${provider} account removed`); oauthAccounts = r?.accounts ?? []; }
+      else flash("remove failed: " + JSON.stringify(r?.error ?? r).slice(0, 120));
+    } catch (e) { flash(`remove failed: ${e}`); }
+    finally { oauthBusy = ""; }
+  }
+
+  async function refreshOAuthTokens() {
+    oauthBusy = "refresh";
+    try {
+      const r = await post<any>("/api/oauth/refresh", {});
+      oauthAccounts = r?.accounts ?? oauthAccounts;
+      flash("Token refresh completed");
+    } catch (e) { flash(`refresh failed: ${e}`); }
+    finally { oauthBusy = ""; }
   }
 
   async function saveManualApiKey() {
@@ -190,7 +246,7 @@
 
     <nav class="settings-tabs" aria-label="Settings sections">
       <button class:current={activeSection === "access"} onclick={() => activeSection = "access"}><span>01</span> API access</button>
-      <button class:current={activeSection === "accounts"} onclick={() => activeSection = "accounts"}><span>02</span> Cline accounts <b>{accounts.length}</b></button>
+      <button class:current={activeSection === "accounts"} onclick={() => activeSection = "accounts"}><span>02</span> Accounts <b>{accounts.length + oauthAccounts.length}</b></button>
       <button class:current={activeSection === "runtime"} onclick={() => activeSection = "runtime"}><span>03</span> Gateway</button>
     </nav>
 
@@ -210,7 +266,7 @@
       </section>
     {:else if activeSection === "accounts"}
       <section class="settings-section">
-        <div class="section-intro"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Cline accounts</h2><p>Connect accounts, check availability, and remove access you no longer use.</p></div><span class="section-index">02 / 03</span></div>
+        <div class="section-intro"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Connected accounts</h2><p>Connect Cline, Codex, and Antigravity accounts. CLI login also works.</p></div><span class="section-index">02 / 03</span></div>
         <div class="settings-card cline-card">
           <div class="cline-connect">
             <div class="cline-symbol" aria-hidden="true">C</div><div class="cline-copy"><div class="eyebrow">SECURE SIGN IN</div><h3>Connect a Cline account</h3><p>Approve the sign-in in your browser. Your account stays on this gateway.</p></div>
@@ -243,13 +299,46 @@
         {/if}
 
         <details class="manual-import"><summary>Have a refresh token? Import it manually</summary><div class="manual-import-body"><p>Tokens are validated with Cline before an account is added.</p><div class="manual-key-row"><input class="token-field" type="password" autocomplete="off" placeholder="Paste Cline refresh token" bind:value={refreshToken} /><button class="btn-ghost" onclick={addClineToken} disabled={!refreshToken.trim() || accountBusy}>{accountBusy ? "Checking…" : "Validate and add"}</button></div></div></details>
+        <div class="account-list-head"><div><h3>Codex accounts</h3><p>{codexAccounts.length} {codexAccounts.length === 1 ? "account" : "accounts"} · CLI: <code>zenflash-llm login codex</code></p></div><button class="btn-ghost" onclick={refreshOAuthTokens} disabled={oauthBusy === "refresh"}>{oauthBusy === "refresh" ? "Refreshing…" : "Refresh tokens"}</button></div>
+        {#if oauthLoading && !oauthAccounts.length}
+          <div class="settings-card account-empty">Loading account status…</div>
+        {:else if codexAccounts.length}
+          <div class="account-list">
+            {#each codexAccounts as a (a.id)}
+              <article class="account-row">
+                <div class="account-avatar">{String(a.email || "X").slice(0, 1).toUpperCase()}</div>
+                <div class="account-identity"><strong title={a.email || a.id}>{a.email || a.id}</strong><span>ChatGPT Codex · {a.stale ? "needs refresh" : "ready"}</span></div>
+                <div class="account-actions"><button class="remove-action" disabled={!!oauthBusy} onclick={() => removeOAuthAccount("codex", a.id)}>Remove</button></div>
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <div class="settings-card account-empty"><div class="empty-mark">X</div><h3>No Codex accounts</h3><p>Paste a refresh token below or run the CLI login on the gateway host.</p></div>
+        {/if}
+        <details class="manual-import"><summary>Connect Codex with a refresh token</summary><div class="manual-import-body"><p>The token is exchanged once to verify it, then stored beside the config.</p><div class="manual-key-row"><input class="token-field" type="password" autocomplete="off" placeholder="Paste ChatGPT refresh token" bind:value={codexToken} /><button class="btn-ghost" onclick={() => importOAuthToken("codex")} disabled={!codexToken.trim() || !!oauthBusy}>{oauthBusy === "codex" ? "Checking…" : "Validate and add"}</button></div><p>Or on the gateway host: <code>zenflash-llm login codex</code></p></div></details>
+
+        <div class="account-list-head"><div><h3>Antigravity accounts</h3><p>{antigravityAccounts.length} {antigravityAccounts.length === 1 ? "account" : "accounts"} · CLI: <code>zenflash-llm login antigravity</code></p></div></div>
+        {#if antigravityAccounts.length}
+          <div class="account-list">
+            {#each antigravityAccounts as a (a.id)}
+              <article class="account-row">
+                <div class="account-avatar">{String(a.email || "G").slice(0, 1).toUpperCase()}</div>
+                <div class="account-identity"><strong title={a.email || a.id}>{a.email || a.id}</strong><span>{a.project_id ? "project " + a.project_id : "Google Antigravity"} · {a.stale ? "needs refresh" : "ready"}</span></div>
+                <div class="account-actions"><button class="remove-action" disabled={!!oauthBusy} onclick={() => removeOAuthAccount("antigravity", a.id)}>Remove</button></div>
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <div class="settings-card account-empty"><div class="empty-mark">G</div><h3>No Antigravity accounts</h3><p>Paste a refresh token below or run the CLI login on the gateway host.</p></div>
+        {/if}
+        <details class="manual-import"><summary>Connect Antigravity with a refresh token</summary><div class="manual-import-body"><p>The token is refreshed and synced (profile, project, models) before it is stored.</p><div class="manual-key-row"><input class="token-field" type="password" autocomplete="off" placeholder="Paste Google refresh token" bind:value={antigravityToken} /><button class="btn-ghost" onclick={() => importOAuthToken("antigravity")} disabled={!antigravityToken.trim() || !!oauthBusy}>{oauthBusy === "antigravity" ? "Checking…" : "Validate and add"}</button></div><p>Or on the gateway host: <code>zenflash-llm login antigravity</code></p></div></details>
       </section>
     {:else}
       <section class="settings-section">
         <div class="section-intro"><div><div class="eyebrow">GATEWAY CONTROL</div><h2>Runtime settings</h2><p>Adjust routing, model behavior, performance, and dashboard security.</p></div><span class="section-index">03 / 03</span></div>
         <div class="runtime-grid">
           <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">NETWORK</div><h3>Gateway &amp; routing</h3></div></div><div class="field-grid">
-            <label>Preference<select bind:value={config.prefer}><option value="go">Primary</option><option value="zen">Secondary</option></select></label><label>Provider endpoint A<input class="font-mono" bind:value={config.upstream.zen} /></label><label>Provider endpoint B<input class="font-mono" bind:value={config.upstream.go} /></label><label>Proxy file<input class="font-mono" bind:value={config.proxyfile} /></label><label>Upstream access<span class="toggle-field"><input type="checkbox" bind:checked={config.anonymous} /><span>Permit anonymous upstream access</span></span></label>
+            <label>Preference<select bind:value={config.prefer}><option value="go">go</option><option value="zen">zen</option><option value="codex">codex</option><option value="antigravity">antigravity</option></select></label><label>Zen endpoint<input class="font-mono" bind:value={config.upstream.zen} /></label><label>Go endpoint<input class="font-mono" bind:value={config.upstream.go} /></label><label class="wide-field">Codex endpoint<input class="font-mono" bind:value={config.upstream.codex} /></label><label class="wide-field">Antigravity endpoint<input class="font-mono" placeholder="empty uses daily Cloud Code" bind:value={config.upstream.antigravity} /></label><label>Proxy file<input class="font-mono" bind:value={config.proxyfile} /></label><label>Upstream access<span class="toggle-field"><input type="checkbox" bind:checked={config.anonymous} /><span>Permit anonymous upstream access</span></span></label>
           </div></article>
           <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">REQUEST POLICY</div><h3>Retries &amp; models</h3></div></div><div class="field-grid"><label>Retry attempts<input type="number" min="1" bind:value={config.retry.max_attempts} /></label><label>Request timeout (seconds)<input type="number" min="1" bind:value={config.retry.timeout_seconds} /></label><label>Catalog refresh (seconds)<input type="number" min="1" bind:value={config.models.refresh_seconds} /></label><label class="wide-field">Protocol overrides (JSON)<textarea rows="4" class="font-mono" bind:value={protocols}></textarea></label></div></article>
           <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">CAPACITY</div><h3>Performance</h3></div></div><div class="field-grid"><label>Failure cooldown (seconds)<input type="number" min="1" bind:value={config.performance.failure_cooldown_seconds} /></label><label>Attempt timeout (seconds)<input type="number" min="0" bind:value={config.performance.attempt_timeout_seconds} /></label><label>Connect timeout (seconds)<input type="number" min="1" bind:value={config.performance.connect_timeout_seconds} /></label><label>Max connections per host<input type="number" min="0" bind:value={config.performance.max_conns_per_host} /></label></div></article>

@@ -61,6 +61,8 @@
               <span class="pill">{m.native_protocol ?? "?"}</span>
               <span class="pill" class:good={m.available_zen}>zen</span>
               <span class="pill" class:good={m.available_go}>go</span>
+              <span class="pill" class:good={m.available_codex}>codex</span>
+              {#if m.available_antigravity}<span class="pill good">ag</span>{/if}
               {#if m.anonymous}<span class="pill good">anon</span>{/if}
               {#if m.route_error}<span class="pill bad">{m.route_error}</span>{/if}
             </div>

@@ -27,7 +27,7 @@
   onMount(load);
 
   const models = $derived((data?.models ?? []).filter((m: any) => m.anonymous_eligibility?.allowed));
-  const keys = $derived(data?.keys ?? { zen: [], go: [] });
+  const keys = $derived(data?.keys ?? { zen: [], go: [], codex: [], antigravity: [] });
   const catById = $derived(new Map<string, any>((catalog?.data ?? []).map((m: any) => [m.id, m])));
   const selectedCat = $derived(catById.get(model));
   const keyOptions = $derived(keys[keyTier] ?? []);
@@ -78,7 +78,7 @@
         <option value="selected">select key</option>
       </select>
       {#if keyMode === "selected"}
-        <select bind:value={keyTier} class="w-auto" aria-label="tier"><option value="zen">zen</option><option value="go">go</option></select>
+        <select bind:value={keyTier} class="w-auto" aria-label="tier"><option value="zen">zen</option><option value="go">go</option><option value="codex">codex</option><option value="antigravity">antigravity</option></select>
         <select bind:value={keyId} class="w-auto" aria-label="key">
           {#each keyOptions as k (k.id)}<option value={k.id}>{k.display}</option>{/each}
         </select>

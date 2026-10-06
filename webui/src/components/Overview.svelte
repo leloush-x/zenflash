@@ -75,6 +75,12 @@
         <span class="dim">go keys</span><span class="tnum">{(live?.resources?.keys ?? []).filter((k: any) => k.tier === "go").length}</span>
       </div>
       <div class="flex items-baseline justify-between gap-3 border-b border-[color:var(--color-edge)]/60 py-1.5 text-[13px]">
+        <span class="dim">codex keys</span><span class="tnum">{(live?.resources?.keys ?? []).filter((k: any) => k.tier === "codex").length}</span>
+      </div>
+      <div class="flex items-baseline justify-between gap-3 border-b border-[color:var(--color-edge)]/60 py-1.5 text-[13px]">
+        <span class="dim">antigravity keys</span><span class="tnum">{(live?.resources?.keys ?? []).filter((k: any) => k.tier === "antigravity").length}</span>
+      </div>
+      <div class="flex items-baseline justify-between gap-3 border-b border-[color:var(--color-edge)]/60 py-1.5 text-[13px]">
         <span class="dim">proxies</span><span class="tnum">{(live?.resources?.proxies ?? []).length}</span>
       </div>
       <div class="flex items-baseline justify-between gap-3 border-b border-[color:var(--color-edge)]/60 py-1.5 text-[13px]">

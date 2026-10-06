@@ -6,6 +6,8 @@
   const keyCount = $derived((res?.keys ?? []).length);
   const zenCount = $derived((res?.keys ?? []).filter((k: any) => k.tier === "zen").length);
   const goCount = $derived((res?.keys ?? []).filter((k: any) => k.tier === "go").length);
+  const codexCount = $derived((res?.keys ?? []).filter((k: any) => k.tier === "codex").length);
+  const antigravityCount = $derived((res?.keys ?? []).filter((k: any) => k.tier === "antigravity").length);
   const healthyNodes = $derived((res?.proxies ?? []).filter((p: any) => p.healthy).length);
 </script>
 
@@ -13,6 +15,8 @@
 <div class="resource-strip fade-up">
   <div class="resource-stat"><span>ZEN POOL</span><strong>{zenCount}</strong><small>provider keys</small></div>
   <div class="resource-stat"><span>GO POOL</span><strong>{goCount}</strong><small>provider keys</small></div>
+  <div class="resource-stat"><span>CODEX POOL</span><strong>{codexCount}</strong><small>provider keys</small></div>
+  <div class="resource-stat"><span>ANTIGRAVITY POOL</span><strong>{antigravityCount}</strong><small>provider keys</small></div>
   <div class="resource-stat"><span>ALL KEYS</span><strong>{keyCount}</strong><small>active pool entries</small></div>
   <div class="resource-stat"><span>PROXY HEALTH</span><strong>{healthyNodes}<i> / {(res?.proxies ?? []).length}</i></strong><small>healthy nodes</small></div>
 </div>
@@ -45,7 +49,7 @@
     <div class="eyebrow">proxy nodes</div>
     <div class="overflow-auto rounded-xl border border-[color:var(--color-edge)] bg-[oklch(0.14_0.012_272/0.45)]" style="max-height: 60vh">
       <table class="table-cards">
-        <thead><tr><th class="num">idx</th><th>address</th><th>health</th><th class="num">zen</th><th class="num">go</th><th class="num">anon</th></tr></thead>
+        <thead><tr><th class="num">idx</th><th>address</th><th>health</th><th class="num">zen</th><th class="num">go</th><th class="num">codex</th><th class="num">ag</th><th class="num">anon</th></tr></thead>
         <tbody>
           {#each res?.proxies ?? [] as p (p.index)}
             <tr>
@@ -54,11 +58,13 @@
               <td data-label="health"><span class="pill" class:good={p.healthy} class:bad={!p.healthy}><span class="dot"></span>{p.healthy ? "healthy" : p.checking ? "checking" : "down"}</span></td>
               <td data-label="zen" class="num">{p.zen_keys}</td>
               <td data-label="go" class="num">{p.go_keys}</td>
+              <td data-label="codex" class="num">{p.codex_keys ?? 0}</td>
+              <td data-label="ag" class="num">{p.antigravity_keys ?? 0}</td>
               <td data-label="anon" class="num">{p.anonymous ? 1 : 0}</td>
             </tr>
           {/each}
           {#if !(res?.proxies ?? []).length}
-            <tr><td colspan="6"><div class="empty">no proxy nodes reported</div></td></tr>
+            <tr><td colspan="8"><div class="empty">no proxy nodes reported</div></td></tr>
           {/if}
         </tbody>
       </table>
