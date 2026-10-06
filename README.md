@@ -453,3 +453,43 @@ go build -trimpath -ldflags "-s -w -X main.version=v1.0.0" -o zenflash-llm ./cmd
 ## License
 
 MIT.
+
+## Code map (v2)
+
+- `cmd/zenflash-llm`: flags, env validation, servers, embedded Cline boot.
+- `internal/config`: single typed config + env (all defaults/constants/headers/routes).
+- `internal/gateway`: routes, auth (memory keys, DB-backed when configured), retries.
+- `internal/protocol`: Chat/Responses/Anthropic/System One conversion + SSE.
+- `internal/models`: discovery, catalog/pricing caches, routing.
+- `internal/admin`: management API + embedded UI.
+- `internal/cline`: embedded Cline proxy (`app`), registration (`cline`), helpers (`kit`).
+- `internal/codex`, `internal/antigravity`: OAuth tiers, token stores.
+- `internal/store`: optional Neon Postgres (migrations, importer, key TTL, async stats).
+- `internal/httpx`, `internal/identity`, `internal/jsonutil`, `internal/telemetry`: shared support.
+- `webui`: dashboard source + embedded dist (rebuild only when UI changes).
+
+Env: see `.env.example`. `DATABASE_URL` empty keeps file behavior; set uses
+Postgres with file fallback, memory serving, async stats.
+
+## Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/v1/models` | Models that can be routed with the current configuration. |
+| POST | `/v1/chat/completions` | Chat Completions. |
+| POST | `/v1/responses` | Responses. |
+| POST | `/v1/messages` | Anthropic Messages. |
+| GET | `/healthz` | Readiness and resource summary. |
+| POST | `/v1/systemone` | Jev decision endpoint (System One models only). |
+
+Every model ID listed under `/v1/models` works on every inference ingress:
+Chat, Responses, and Anthropic convert through the shared internal protocol,
+so an OpenAI-native model answers Anthropic requests and vice versa. Jev
+decision models answer only `/v1/systemone` (they have no message-shaped
+equivalent); a decision payload sent to a message endpoint is relayed verbatim.
+
+Provider pins: when the same raw ID exists on both OpenCode (zen) and Cline
+(go), `/v1/models` shows the bare ID (prefer-order, backward compatible) plus
+`opencode/<id>` and `cline/<id>`. Either prefixed ID is accepted on all
+inference routes and pins that provider (`zen/`, `go/`, `codex/`,
+`antigravity/` aliases also work).
