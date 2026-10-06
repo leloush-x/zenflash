@@ -345,6 +345,18 @@ func (m *RuntimeManager) DebugModels() ([]modelcatalog.RouteDiagnostic, modelcat
 	result := make([]modelcatalog.RouteDiagnostic, 0, len(models))
 	for _, model := range models {
 		result = append(result, gateway.catalog.DiagnosticWithAntigravity(model, "", len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous))
+		tiers := gateway.catalog.TiersForModel(model)
+		hasZen, hasGo := false, false
+		for _, tier := range tiers {
+			hasZen = hasZen || tier == config.TierZen
+			hasGo = hasGo || tier == config.TierGo
+		}
+		if hasZen && hasGo {
+			for _, tier := range []config.Tier{config.TierZen, config.TierGo} {
+				alias := modelcatalog.AliasID(tier, model)
+				result = append(result, m.DebugRoute(alias, ""))
+			}
+		}
 	}
 	metadata := gateway.catalog.MetadataSnapshot()
 	return result, metadata

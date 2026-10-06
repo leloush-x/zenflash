@@ -19,7 +19,7 @@
     try {
       data = await api("/api/debug/models");
       catalog = await api("/api/catalog").catch(() => null);
-      const list = (data?.models ?? []).filter(usable);
+      const list = (data?.models ?? []).filter((m: any) => usable(m) && !m.route_error);
       const first = list.find((m: any) => m.anonymous_eligibility?.allowed) ?? list[0];
       if (!model && first) model = first.model;
     } catch {}
@@ -27,8 +27,9 @@
 
   onMount(load);
 
-  const usable = (m: any) => m.anonymous_eligibility?.allowed || m.available_codex || m.available_antigravity;
-  const models = $derived((data?.models ?? []).filter(usable));
+  const usable = (m: any) => m.anonymous_eligibility?.allowed || m.available_zen || m.available_go || m.available_codex || m.available_antigravity;
+  const models = $derived((data?.models ?? []).filter((m: any) => usable(m) && !m.route_error));
+  const providerName = (id: string) => id.startsWith("opencode/") ? "OpenCode" : id.startsWith("cline/") ? "Cline" : id.startsWith("codex/") ? "Codex" : id.startsWith("antigravity/") ? "Antigravity" : "auto";
   const keys = $derived(data?.keys ?? { zen: [], go: [], codex: [], antigravity: [] });
   const catById = $derived(new Map<string, any>((catalog?.data ?? []).map((m: any) => [m.id, m])));
   const selectedCat = $derived(catById.get(model));
@@ -94,7 +95,7 @@
     <div class="flex flex-wrap items-center gap-2 lg:ml-auto">
       <select class="min-w-0 grow sm:min-w-56 lg:grow-0 lg:min-w-64" bind:value={model} aria-label="model">
         {#each models as m (m.model)}
-          <option value={m.model}>{m.model} · {m.native_protocol}</option>
+          <option value={m.model}>{providerName(m.model)} · {m.model.replace(/^(opencode|cline|codex|antigravity)\//, "")} · {m.native_protocol}</option>
         {/each}
       </select>
       <button onclick={run} disabled={busy || !model} class="btn-primary grow px-6 sm:grow-0">

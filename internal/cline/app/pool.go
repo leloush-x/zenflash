@@ -58,6 +58,18 @@ func loadPool() *AccountPool {
 	return pool
 }
 
+func hasActiveClineAccount() bool {
+	p := loadPool()
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	for _, account := range p.Accounts {
+		if account != nil && account.Status == "active" {
+			return true
+		}
+	}
+	return false
+}
+
 // setDefaultModel 持久化默认模型：更新内存全局并写入账号池文件
 func setDefaultModel(modelID string) {
 	initModelsCache()

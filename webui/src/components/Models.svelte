@@ -40,7 +40,7 @@
   const freeCount = $derived(all.filter((m: any) => m.anonymous_eligibility?.allowed).length);
   const agCount = $derived(all.filter((m: any) => m.available_antigravity).length);
   const codexCount = $derived(all.filter((m: any) => m.available_codex).length);
-  const usable = (m: any) => m.anonymous_eligibility?.allowed || m.available_codex || m.available_antigravity;
+  const usable = (m: any) => m.anonymous_eligibility?.allowed || m.available_zen || m.available_go || m.available_codex || m.available_antigravity;
   const mineCount = $derived(all.filter((m: any) => !m.anonymous_eligibility?.allowed && (m.available_codex || m.available_antigravity)).length);
   const visible = $derived(
     all.filter(

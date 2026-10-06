@@ -117,7 +117,7 @@ func routeModel(id string) string {
 			_, inCline := modelsCache[id]
 			modelsMu.Unlock()
 			if !inCline {
-				if cfg.Failover && zenFailedNow() {
+				if shouldFailoverToCline(cfg.Failover, zenFailedNow(), hasActiveClineAccount()) {
 					log.Printf("  failover: zen degraded, %q routed to cline pool", id)
 					return "cline"
 				}
@@ -137,7 +137,7 @@ func routeModel(id string) string {
 		short := strings.TrimPrefix(id, "opencode/")
 		if zm, ok := resolveZenModel(short); ok {
 			if isZenFreeModel(zm) {
-				if cfg.Failover && zenFailedNow() {
+				if shouldFailoverToCline(cfg.Failover, zenFailedNow(), hasActiveClineAccount()) {
 					log.Printf("  failover: zen degraded, %q routed to cline pool", id)
 					return "cline"
 				}
@@ -147,6 +147,10 @@ func routeModel(id string) string {
 		}
 	}
 	return "cline"
+}
+
+func shouldFailoverToCline(enabled, zenFailed, hasActiveAccount bool) bool {
+	return enabled && zenFailed && hasActiveAccount
 }
 
 // ============ zen 配置 ============
