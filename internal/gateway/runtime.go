@@ -256,15 +256,15 @@ type KeyStatus struct {
 }
 
 type ProxyStatus struct {
-	Index     int    `json:"index"`
-	Address   string `json:"address"`
-	Healthy   bool   `json:"healthy"`
-	Checking  bool   `json:"checking"`
+	Index           int    `json:"index"`
+	Address         string `json:"address"`
+	Healthy         bool   `json:"healthy"`
+	Checking        bool   `json:"checking"`
 	ZenKeys         int    `json:"zen_keys"`
 	GoKeys          int    `json:"go_keys"`
 	CodexKeys       int    `json:"codex_keys"`
 	AntigravityKeys int    `json:"antigravity_keys,omitempty"`
-	Anonymous bool   `json:"anonymous"`
+	Anonymous       bool   `json:"anonymous"`
 }
 
 func (m *RuntimeManager) Resources() ResourceSnapshot {

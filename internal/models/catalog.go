@@ -40,7 +40,7 @@ type RouteDiagnostic struct {
 	AvailableZen         bool                          `json:"available_zen"`
 	AvailableGo          bool                          `json:"available_go"`
 	AvailableCodex       bool                          `json:"available_codex"`
-	AvailableAntigravity bool                         `json:"available_antigravity,omitempty"`
+	AvailableAntigravity bool                          `json:"available_antigravity,omitempty"`
 	Tier                 config.Tier                   `json:"tier,omitempty"`
 	Anonymous            bool                          `json:"anonymous"`
 	KeyID                string                        `json:"key_id,omitempty"`
@@ -52,12 +52,12 @@ type RouteDiagnostic struct {
 }
 
 type Catalog struct {
-	mu          sync.RWMutex
-	zen         map[string]bool
-	goModels    map[string]bool
-	codexModels map[string]bool
+	mu                sync.RWMutex
+	zen               map[string]bool
+	goModels          map[string]bool
+	codexModels       map[string]bool
 	antigravityModels map[string]bool
-	protocols   map[string]wire.Protocol
+	protocols         map[string]wire.Protocol
 	// nativeProtocols is populated from OpenCode's public model capability
 	// catalog. protocols remains the user-configured override map.
 	nativeProtocols map[config.Tier]map[string]wire.Protocol

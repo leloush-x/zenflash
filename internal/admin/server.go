@@ -106,25 +106,25 @@ type SecretView struct {
 }
 
 type ConfigView struct {
-	Listen      string                   `json:"listen"`
-	ServerKeys  []SecretView             `json:"server_keys"`
-	ZenKeys     []SecretView             `json:"zen_keys"`
+	Listen          string                   `json:"listen"`
+	ServerKeys      []SecretView             `json:"server_keys"`
+	ZenKeys         []SecretView             `json:"zen_keys"`
 	GoKeys          []SecretView             `json:"go_keys"`
 	CodexKeys       []SecretView             `json:"codex_keys,omitempty"`
 	AntigravityKeys []SecretView             `json:"antigravity_keys,omitempty"`
 	Anonymous       bool                     `json:"anonymous"`
-	Proxies     []SecretView             `json:"proxies"`
-	ProxyFile   string                   `json:"proxyfile"`
-	Upstream    config.UpstreamConfig    `json:"upstream"`
-	Retry       config.RetryConfig       `json:"retry"`
-	Models      config.ModelsConfig      `json:"models"`
-	Performance config.PerformanceConfig `json:"performance"`
-	Logging     config.LoggingConfig     `json:"logging"`
-	Prefer      config.Tier              `json:"prefer"`
-	Reasoning   config.ReasoningConfig   `json:"reasoning"`
-	WebUI       WebUIView                `json:"webui"`
-	Effective   EffectiveView            `json:"effective"`
-	Restart     []string                 `json:"restart_required_fields,omitempty"`
+	Proxies         []SecretView             `json:"proxies"`
+	ProxyFile       string                   `json:"proxyfile"`
+	Upstream        config.UpstreamConfig    `json:"upstream"`
+	Retry           config.RetryConfig       `json:"retry"`
+	Models          config.ModelsConfig      `json:"models"`
+	Performance     config.PerformanceConfig `json:"performance"`
+	Logging         config.LoggingConfig     `json:"logging"`
+	Prefer          config.Tier              `json:"prefer"`
+	Reasoning       config.ReasoningConfig   `json:"reasoning"`
+	WebUI           WebUIView                `json:"webui"`
+	Effective       EffectiveView            `json:"effective"`
+	Restart         []string                 `json:"restart_required_fields,omitempty"`
 }
 
 type EffectiveView struct {
@@ -146,21 +146,21 @@ type SecretInput struct {
 }
 
 type ConfigUpdate struct {
-	Listen      string                   `json:"listen"`
-	ServerKeys  []SecretInput            `json:"server_keys"`
-	ZenKeys     []SecretInput            `json:"zen_keys"`
+	Listen          string                   `json:"listen"`
+	ServerKeys      []SecretInput            `json:"server_keys"`
+	ZenKeys         []SecretInput            `json:"zen_keys"`
 	GoKeys          []SecretInput            `json:"go_keys"`
 	CodexKeys       []SecretInput            `json:"codex_keys,omitempty"`
 	AntigravityKeys []SecretInput            `json:"antigravity_keys,omitempty"`
 	Anonymous       bool                     `json:"anonymous"`
-	Proxies     []SecretInput            `json:"proxies"`
-	ProxyFile   string                   `json:"proxyfile"`
-	Upstream    config.UpstreamConfig    `json:"upstream"`
-	Retry       config.RetryConfig       `json:"retry"`
-	Models      config.ModelsConfig      `json:"models"`
-	Performance config.PerformanceConfig `json:"performance"`
-	Logging     config.LoggingConfig     `json:"logging"`
-	Prefer      config.Tier              `json:"prefer"`
+	Proxies         []SecretInput            `json:"proxies"`
+	ProxyFile       string                   `json:"proxyfile"`
+	Upstream        config.UpstreamConfig    `json:"upstream"`
+	Retry           config.RetryConfig       `json:"retry"`
+	Models          config.ModelsConfig      `json:"models"`
+	Performance     config.PerformanceConfig `json:"performance"`
+	Logging         config.LoggingConfig     `json:"logging"`
+	Prefer          config.Tier              `json:"prefer"`
 	// A pointer distinguishes an omitted field (legacy clients should keep the
 	// current reasoning configuration) from an explicit empty object (clear it).
 	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`

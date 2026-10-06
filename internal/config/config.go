@@ -16,22 +16,22 @@ import (
 )
 
 type Config struct {
-	Listen      string            `json:"listen"`
-	ServerKeys  []string          `json:"server_keys"`
-	ZenKeys     []string          `json:"zen_keys"`
-	GoKeys      []string          `json:"go_keys"`
-	CodexKeys   []string          `json:"codex_keys"`
+	Listen          string            `json:"listen"`
+	ServerKeys      []string          `json:"server_keys"`
+	ZenKeys         []string          `json:"zen_keys"`
+	GoKeys          []string          `json:"go_keys"`
+	CodexKeys       []string          `json:"codex_keys"`
 	AntigravityKeys []string          `json:"antigravity_keys"`
-	Anonymous   bool              `json:"anonymous"`
-	Proxies     []string          `json:"proxies"`
-	ProxyFile   string            `json:"proxyfile"`
-	Upstream    UpstreamConfig    `json:"upstream"`
-	Retry       RetryConfig       `json:"retry"`
-	Models      ModelsConfig      `json:"models"`
-	Performance PerformanceConfig `json:"performance"`
-	Logging     LoggingConfig     `json:"logging"`
-	WebUI       WebUIConfig       `json:"webui"`
-	Prefer      Tier              `json:"prefer"`
+	Anonymous       bool              `json:"anonymous"`
+	Proxies         []string          `json:"proxies"`
+	ProxyFile       string            `json:"proxyfile"`
+	Upstream        UpstreamConfig    `json:"upstream"`
+	Retry           RetryConfig       `json:"retry"`
+	Models          ModelsConfig      `json:"models"`
+	Performance     PerformanceConfig `json:"performance"`
+	Logging         LoggingConfig     `json:"logging"`
+	WebUI           WebUIConfig       `json:"webui"`
+	Prefer          Tier              `json:"prefer"`
 	// Reasoning configures a forced thinking level. Both fields are optional
 	// and empty by default, so an existing configuration keeps the client's own
 	// level untouched.
@@ -55,8 +55,8 @@ type ReasoningConfig struct {
 }
 
 type UpstreamConfig struct {
-	Zen   string `json:"zen"`
-	Go    string `json:"go"`
+	Zen         string `json:"zen"`
+	Go          string `json:"go"`
 	Codex       string `json:"codex,omitempty"`
 	Antigravity string `json:"antigravity,omitempty"`
 }

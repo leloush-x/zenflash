@@ -30,12 +30,12 @@ const (
 	// secrets. The matching client secret is never stored here: configure it
 	// via ANTIGRAVITY_OAUTH_CLIENTS (see oauthClientsFromEnv).
 	DefaultClientID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-	AuthURL             = "https://accounts.google.com/o/oauth2/v2/auth"
-	TokenURL            = "https://oauth2.googleapis.com/token"
-	UserInfoURL         = "https://www.googleapis.com/oauth2/v2/userinfo"
-	Scopes              = "openid https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs https://www.googleapis.com/auth/aicode"
-	ClientVersion       = "2.19.1"
-	CallbackPath        = "/oauth-callback"
+	AuthURL         = "https://accounts.google.com/o/oauth2/v2/auth"
+	TokenURL        = "https://oauth2.googleapis.com/token"
+	UserInfoURL     = "https://www.googleapis.com/oauth2/v2/userinfo"
+	Scopes          = "openid https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs https://www.googleapis.com/auth/aicode"
+	ClientVersion   = "2.19.1"
+	CallbackPath    = "/oauth-callback"
 )
 
 var (
@@ -504,7 +504,7 @@ func fetchProject(ctx context.Context, client *http.Client, accessToken string) 
 
 func onboard(ctx context.Context, client *http.Client, accessToken string) (string, error) {
 	payload := map[string]any{
-		"tierId": "free-tier",
+		"tierId":   "free-tier",
 		"metadata": map[string]any{"ideType": "ANTIGRAVITY", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI"},
 	}
 	for _, ep := range OnboardEndpoints {
@@ -940,8 +940,8 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 					args = []byte("{}")
 				}
 				toolCalls = append(toolCalls, map[string]any{
-					"id": "call_" + hex8(p.FunctionCall.Name+string(args)),
-					"type": "function",
+					"id":       "call_" + hex8(p.FunctionCall.Name+string(args)),
+					"type":     "function",
 					"function": map[string]any{"name": p.FunctionCall.Name, "arguments": string(args)},
 				})
 			}
@@ -955,16 +955,16 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 	usage := map[string]any{}
 	if r.UsageMetadata != nil {
 		usage = map[string]any{
-			"prompt_tokens": r.UsageMetadata.PromptTokenCount,
+			"prompt_tokens":     r.UsageMetadata.PromptTokenCount,
 			"completion_tokens": r.UsageMetadata.CandidatesTokenCount,
-			"total_tokens": r.UsageMetadata.TotalTokenCount,
+			"total_tokens":      r.UsageMetadata.TotalTokenCount,
 		}
 	}
 	out := map[string]any{
-		"id": "antigravity-" + hex8(strings.Join(text, "")+model),
+		"id":     "antigravity-" + hex8(strings.Join(text, "")+model),
 		"object": "chat.completion", "created": time.Now().Unix(), "model": model,
 		"choices": []any{map[string]any{"index": 0, "message": msg, "finish_reason": "stop"}},
-		"usage": usage,
+		"usage":   usage,
 	}
 	return json.Marshal(out)
 }
@@ -973,7 +973,6 @@ func hex8(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])[:8]
 }
-
 
 // WantsStream reports whether a Chat wire body asked for SSE.
 func WantsStream(chatBody []byte) bool {

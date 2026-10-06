@@ -30,16 +30,16 @@ const maxRequestBody = 32 << 20
 const anonymousZenKey = "public"
 
 type Gateway struct {
-	cfg           config.Config
-	logger        *slog.Logger
-	transports    *transportPool
-	zenNodes      *nodePool
-	goNodes       *nodePool
-	anonymous     *anonymousPool
-	catalog       *models.Catalog
-	monitor       *telemetry.Monitor
-	codexAuthPath string
-	codexNodes    atomic.Pointer[nodePool]
+	cfg                 config.Config
+	logger              *slog.Logger
+	transports          *transportPool
+	zenNodes            *nodePool
+	goNodes             *nodePool
+	anonymous           *anonymousPool
+	catalog             *models.Catalog
+	monitor             *telemetry.Monitor
+	codexAuthPath       string
+	codexNodes          atomic.Pointer[nodePool]
 	antigravityAuthPath string
 	antigravityNodes    atomic.Pointer[nodePool]
 }
@@ -120,14 +120,14 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor, con
 	catalog := models.NewCatalog(cfg.Prefer, cfg.Models.Protocols)
 	catalog.SetRefreshInterval(time.Duration(cfg.Models.RefreshSeconds) * time.Second)
 	g := &Gateway{
-		cfg:           cfg,
-		logger:        logger,
-		transports:    transports,
-		zenNodes:      zenNodes,
-		goNodes:       goNodes,
-		anonymous:     newAnonymousPool(cfg.Anonymous, transports, cooldown),
-		catalog:       catalog,
-		monitor:       monitor,
+		cfg:                 cfg,
+		logger:              logger,
+		transports:          transports,
+		zenNodes:            zenNodes,
+		goNodes:             goNodes,
+		anonymous:           newAnonymousPool(cfg.Anonymous, transports, cooldown),
+		catalog:             catalog,
+		monitor:             monitor,
 		codexAuthPath:       codex.AuthPath(configPath),
 		antigravityAuthPath: antigravity.AuthPath(configPath),
 	}
