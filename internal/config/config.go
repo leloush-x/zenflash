@@ -21,6 +21,7 @@ type Config struct {
 	ZenKeys     []string          `json:"zen_keys"`
 	GoKeys      []string          `json:"go_keys"`
 	CodexKeys   []string          `json:"codex_keys"`
+	AntigravityKeys []string          `json:"antigravity_keys"`
 	Anonymous   bool              `json:"anonymous"`
 	Proxies     []string          `json:"proxies"`
 	ProxyFile   string            `json:"proxyfile"`
@@ -56,7 +57,8 @@ type ReasoningConfig struct {
 type UpstreamConfig struct {
 	Zen   string `json:"zen"`
 	Go    string `json:"go"`
-	Codex string `json:"codex,omitempty"`
+	Codex       string `json:"codex,omitempty"`
+	Antigravity string `json:"antigravity,omitempty"`
 }
 
 type RetryConfig struct {
@@ -159,12 +161,13 @@ func Normalize(path string, cfg Config) (Config, error) {
 	trimList(&cfg.ZenKeys)
 	trimList(&cfg.GoKeys)
 	trimList(&cfg.CodexKeys)
+	trimList(&cfg.AntigravityKeys)
 	cfg.ProxyFile = strings.TrimSpace(cfg.ProxyFile)
 	if err := resolveProxyFiles(path, &cfg); err != nil {
 		return Config{}, err
 	}
-	if cfg.Prefer != TierZen && cfg.Prefer != TierGo && cfg.Prefer != TierCodex {
-		return Config{}, errors.New("prefer must be \"zen\", \"go\", or \"codex\"")
+	if cfg.Prefer != TierZen && cfg.Prefer != TierGo && cfg.Prefer != TierCodex && cfg.Prefer != TierAntigravity {
+		return Config{}, errors.New("prefer must be \"zen\", \"go\", \"codex\", or \"antigravity\"")
 	}
 	if cfg.Listen == "" {
 		return Config{}, errors.New("listen must not be empty")
@@ -172,6 +175,7 @@ func Normalize(path string, cfg Config) (Config, error) {
 	cfg.Upstream.Zen = strings.TrimSpace(cfg.Upstream.Zen)
 	cfg.Upstream.Go = strings.TrimSpace(cfg.Upstream.Go)
 	cfg.Upstream.Codex = strings.TrimSpace(cfg.Upstream.Codex)
+	cfg.Upstream.Antigravity = strings.TrimSpace(cfg.Upstream.Antigravity)
 	if cfg.Upstream.Codex == "" && len(cfg.CodexKeys) > 0 {
 		cfg.Upstream.Codex = "https://chatgpt.com/backend-api/codex"
 	}
@@ -179,6 +183,12 @@ func Normalize(path string, cfg Config) (Config, error) {
 		u, err := url.Parse(strings.TrimSpace(raw))
 		if err != nil || u.Host == "" || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") {
 			return Config{}, fmt.Errorf("%s must be an http or https URL", name)
+		}
+	}
+	if cfg.Upstream.Antigravity != "" {
+		u, err := url.Parse(cfg.Upstream.Antigravity)
+		if err != nil || u.Host == "" || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") {
+			return Config{}, fmt.Errorf("upstream.antigravity must be an http or https URL")
 		}
 	}
 	if cfg.Upstream.Codex != "" {
@@ -189,8 +199,8 @@ func Normalize(path string, cfg Config) (Config, error) {
 	}
 	// server_keys may be empty: that disables client auth entirely (public,
 	// no-key mode) instead of requiring at least one.
-	if !cfg.Anonymous && len(cfg.ZenKeys) == 0 && len(cfg.GoKeys) == 0 && len(cfg.CodexKeys) == 0 {
-		return Config{}, errors.New("zen_keys, go_keys, or codex_keys must contain at least one upstream key unless anonymous is enabled")
+	if !cfg.Anonymous && len(cfg.ZenKeys) == 0 && len(cfg.GoKeys) == 0 && len(cfg.CodexKeys) == 0 && len(cfg.AntigravityKeys) == 0 {
+		return Config{}, errors.New("zen_keys, go_keys, codex_keys, or antigravity_keys must contain at least one upstream key unless anonymous is enabled")
 	}
 	if cfg.Retry.MaxAttempts < 1 {
 		return Config{}, errors.New("retry.max_attempts must be at least 1")
@@ -334,6 +344,7 @@ func Clone(cfg Config) Config {
 	cfg.ZenKeys = append([]string(nil), cfg.ZenKeys...)
 	cfg.GoKeys = append([]string(nil), cfg.GoKeys...)
 	cfg.CodexKeys = append([]string(nil), cfg.CodexKeys...)
+	cfg.AntigravityKeys = append([]string(nil), cfg.AntigravityKeys...)
 	cfg.Proxies = append([]string(nil), cfg.Proxies...)
 	cfg.effectiveProxies = append([]string(nil), cfg.effectiveProxies...)
 	if cfg.Models.Protocols != nil {

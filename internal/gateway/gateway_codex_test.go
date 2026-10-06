@@ -88,7 +88,7 @@ func TestCodexTierRequestShapeAndCollapse(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if capturedAuth != "Bearer tok" || capturedUA != "OpenAI/codex" {
+	if capturedAuth != "Bearer tok" || capturedUA != "codex-cli/0.91.0" {
 		t.Fatalf("captured auth=%q ua=%q", capturedAuth, capturedUA)
 	}
 	var upstreamBody map[string]any

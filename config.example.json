@@ -8,6 +8,7 @@
     "free"
   ],
   "codex_keys": [],
+  "antigravity_keys": [],
   "anonymous": true,
   "proxies": [
     "direct"
@@ -16,7 +17,8 @@
   "upstream": {
     "zen": "https://opencode.ai/zen",
     "go": "http://127.0.0.1:3457",
-    "codex": "https://chatgpt.com/backend-api/codex"
+    "codex": "https://chatgpt.com/backend-api/codex",
+    "antigravity": ""
   },
   "retry": {
     "max_attempts": 3,

@@ -27,7 +27,7 @@ func TestReasoningOptionsStayExactAndValidate(t *testing.T) {
 	}
 
 	catalog := NewCatalog(config.TierZen, nil)
-	catalog.ReplaceWithCapabilities([]string{"model"}, nil, nil, nil, nil, map[config.Tier]map[string]Metadata{
+	catalog.ReplaceWithCapabilities([]string{"model"}, nil, nil, nil, nil, nil, map[config.Tier]map[string]Metadata{
 		config.TierZen: {"model": metadata},
 	})
 	for _, effort := range []string{"low", "none", "max"} {
@@ -47,7 +47,7 @@ func TestReasoningEffortsSurviveCatalogCache(t *testing.T) {
 	path := t.TempDir() + "/catalog.json"
 	catalog := NewCatalog(config.TierZen, nil)
 	catalog.SetCachePath(path)
-	catalog.ReplaceWithCapabilities([]string{"model"}, nil, nil, nil, nil, map[config.Tier]map[string]Metadata{
+	catalog.ReplaceWithCapabilities([]string{"model"}, nil, nil, nil, nil, nil, map[config.Tier]map[string]Metadata{
 		config.TierZen: {"model": {ReasoningEfforts: []json.RawMessage{json.RawMessage(`"high"`), json.RawMessage(`null`)}}},
 	})
 	if err := catalog.SaveCache(); err != nil {
@@ -71,7 +71,7 @@ func TestCatalogCacheMissStaleFallbackAndBadCache(t *testing.T) {
 	path := dir + "/catalog.json"
 	catalog := NewCatalog(config.TierZen, nil)
 	catalog.SetCachePath(path)
-	catalog.ReplaceWithCapabilities([]string{"fixture"}, nil, nil, map[config.Tier]map[string]wire.Protocol{
+	catalog.ReplaceWithCapabilities([]string{"fixture"}, nil, nil, nil, map[config.Tier]map[string]wire.Protocol{
 		config.TierZen: {"fixture": wire.Chat},
 	}, nil, nil)
 	if err := catalog.SaveCache(); err != nil {

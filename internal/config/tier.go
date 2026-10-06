@@ -3,7 +3,8 @@ package config
 type Tier string
 
 const (
-	TierZen   Tier = "zen"
-	TierGo    Tier = "go"
-	TierCodex Tier = "codex"
+	TierZen         Tier = "zen"
+	TierGo          Tier = "go"
+	TierCodex       Tier = "codex"
+	TierAntigravity Tier = "antigravity"
 )

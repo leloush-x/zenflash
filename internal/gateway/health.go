@@ -34,10 +34,12 @@ type healthModels struct {
 }
 
 type healthKeys struct {
-	Zen       int  `json:"zen"`
-	Go        int  `json:"go"`
-	Total     int  `json:"total"`
-	Anonymous bool `json:"anonymous"`
+	Zen         int  `json:"zen"`
+	Go          int  `json:"go"`
+	Codex       int  `json:"codex,omitempty"`
+	Antigravity int  `json:"antigravity,omitempty"`
+	Total       int  `json:"total"`
+	Anonymous   bool `json:"anonymous"`
 }
 
 type healthProxies struct {
@@ -50,6 +52,8 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	_, models := g.availableModels()
 	proxyTotal, proxyHealthy := g.transports.healthCounts()
 	zenKeys, goKeys := g.zenNodes.Len(), g.goNodes.Len()
+	codexKeys := g.codexPool().Len()
+	antigravityKeys := g.antigravityPool().Len()
 	staleAfter := max(2*time.Duration(g.cfg.Models.RefreshSeconds)*time.Second, time.Minute)
 
 	modelStatus := "ready"
@@ -69,7 +73,7 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, _ *http.Request) {
 			issues = append(issues, "model_catalog_stale")
 		}
 	}
-	if zenKeys+goKeys == 0 && !g.cfg.Anonymous {
+	if zenKeys+goKeys+codexKeys+antigravityKeys == 0 && !g.cfg.Anonymous {
 		issues = append(issues, "no_upstream_keys")
 	}
 	if proxyHealthy == 0 {
@@ -104,7 +108,7 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, _ *http.Request) {
 			CacheSource:       models.CacheSource,
 			Stale:             models.Stale,
 		},
-		Keys: healthKeys{Zen: zenKeys, Go: goKeys, Total: zenKeys + goKeys, Anonymous: g.cfg.Anonymous},
+		Keys: healthKeys{Zen: zenKeys, Go: goKeys, Codex: codexKeys, Antigravity: antigravityKeys, Total: zenKeys + goKeys + codexKeys + antigravityKeys, Anonymous: g.cfg.Anonymous},
 		Proxies: healthProxies{
 			Total:     proxyTotal,
 			Healthy:   proxyHealthy,
@@ -115,7 +119,7 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (g *Gateway) availableModels() ([]modelcatalog.Route, modelcatalog.CatalogSnapshot) {
-	return g.catalog.AvailableModels(g.zenNodes.Len() > 0, g.goNodes.Len() > 0, g.codexPool().Len() > 0, g.cfg.Anonymous)
+	return g.catalog.AvailableModelsWithAntigravity(g.zenNodes.Len() > 0, g.goNodes.Len() > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 }
 
 func (g *Gateway) handleModels(w http.ResponseWriter, _ *http.Request) {

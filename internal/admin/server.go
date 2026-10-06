@@ -66,6 +66,12 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("POST /api/cline/accounts/test", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountTest))))
 	mux.Handle("POST /api/cline/accounts/add", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountAdd))))
 	mux.Handle("GET /api/catalog", a.authenticate(http.HandlerFunc(a.handleCatalog)))
+	mux.Handle("GET /api/oauth/accounts", a.authenticate(http.HandlerFunc(a.handleOAuthAccounts)))
+	mux.Handle("POST /api/codex/accounts/import", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthImport("codex")))))
+	mux.Handle("POST /api/codex/accounts/delete", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthDelete("codex")))))
+	mux.Handle("POST /api/antigravity/accounts/import", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthImport("antigravity")))))
+	mux.Handle("POST /api/antigravity/accounts/delete", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthDelete("antigravity")))))
+	mux.Handle("POST /api/oauth/refresh", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthRefresh))))
 	a.aliasRouting(mux)
 	mux.HandleFunc("/", a.serveSPA())
 	return a.securityHeaders(telemetry.Recover(a.logger, mux))
@@ -92,8 +98,10 @@ type ConfigView struct {
 	Listen      string                   `json:"listen"`
 	ServerKeys  []SecretView             `json:"server_keys"`
 	ZenKeys     []SecretView             `json:"zen_keys"`
-	GoKeys      []SecretView             `json:"go_keys"`
-	Anonymous   bool                     `json:"anonymous"`
+	GoKeys          []SecretView             `json:"go_keys"`
+	CodexKeys       []SecretView             `json:"codex_keys,omitempty"`
+	AntigravityKeys []SecretView             `json:"antigravity_keys,omitempty"`
+	Anonymous       bool                     `json:"anonymous"`
 	Proxies     []SecretView             `json:"proxies"`
 	ProxyFile   string                   `json:"proxyfile"`
 	Upstream    config.UpstreamConfig    `json:"upstream"`
@@ -130,8 +138,10 @@ type ConfigUpdate struct {
 	Listen      string                   `json:"listen"`
 	ServerKeys  []SecretInput            `json:"server_keys"`
 	ZenKeys     []SecretInput            `json:"zen_keys"`
-	GoKeys      []SecretInput            `json:"go_keys"`
-	Anonymous   bool                     `json:"anonymous"`
+	GoKeys          []SecretInput            `json:"go_keys"`
+	CodexKeys       []SecretInput            `json:"codex_keys,omitempty"`
+	AntigravityKeys []SecretInput            `json:"antigravity_keys,omitempty"`
+	Anonymous       bool                     `json:"anonymous"`
 	Proxies     []SecretInput            `json:"proxies"`
 	ProxyFile   string                   `json:"proxyfile"`
 	Upstream    config.UpstreamConfig    `json:"upstream"`
@@ -173,6 +183,22 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, http.StatusBadRequest, "invalid_go_keys", err.Error())
 		return
 	}
+	codexKeys := current.CodexKeys
+	if update.CodexKeys != nil {
+		codexKeys, err = resolveSecrets(update.CodexKeys, current.CodexKeys)
+		if err != nil {
+			writeAdminError(w, http.StatusBadRequest, "invalid_codex_keys", err.Error())
+			return
+		}
+	}
+	antigravityKeys := current.AntigravityKeys
+	if update.AntigravityKeys != nil {
+		antigravityKeys, err = resolveSecrets(update.AntigravityKeys, current.AntigravityKeys)
+		if err != nil {
+			writeAdminError(w, http.StatusBadRequest, "invalid_antigravity_keys", err.Error())
+			return
+		}
+	}
 	proxies, err := resolveSecrets(update.Proxies, current.Proxies)
 	if err != nil {
 		writeAdminError(w, http.StatusBadRequest, "invalid_proxies", err.Error())
@@ -183,7 +209,7 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		reasoning = *update.Reasoning
 	}
 	candidate := config.Config{
-		Listen: update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Proxies: proxies, ProxyFile: update.ProxyFile,
+		Listen: update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, CodexKeys: codexKeys, AntigravityKeys: antigravityKeys, Anonymous: update.Anonymous, Proxies: proxies, ProxyFile: update.ProxyFile,
 		Upstream: update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
 		Reasoning: reasoning,
 		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
@@ -210,7 +236,7 @@ func (a *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 	if a.openAdmin() {
 		cfg := a.manager.Config()
 		w.Header().Set("Cache-Control", "no-store")
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"server_keys": cfg.ServerKeys, "zen_keys": cfg.ZenKeys, "go_keys": cfg.GoKeys, "proxies": cfg.Proxies})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"server_keys": cfg.ServerKeys, "zen_keys": cfg.ZenKeys, "go_keys": cfg.GoKeys, "codex_keys": cfg.CodexKeys, "antigravity_keys": cfg.AntigravityKeys, "proxies": cfg.Proxies})
 		return
 	}
 	var input struct {
@@ -227,7 +253,7 @@ func (a *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.logger.Info("sensitive configuration revealed", "component", "auth", "event", "secrets_revealed", "client_ip", clientIP(r))
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"server_keys": cfg.ServerKeys, "zen_keys": cfg.ZenKeys, "go_keys": cfg.GoKeys, "proxies": cfg.Proxies})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"server_keys": cfg.ServerKeys, "zen_keys": cfg.ZenKeys, "go_keys": cfg.GoKeys, "codex_keys": cfg.CodexKeys, "antigravity_keys": cfg.AntigravityKeys, "proxies": cfg.Proxies})
 }
 
 func (a *Server) handleMonitor(w http.ResponseWriter, _ *http.Request) {
@@ -315,7 +341,7 @@ func (a *Server) configView() ConfigView {
 	cfg := a.manager.Config()
 	effective, restart := a.manager.RestartStatus()
 	return ConfigView{
-		Listen: cfg.Listen, ServerKeys: maskSecrets(cfg.ServerKeys, false), ZenKeys: maskSecrets(cfg.ZenKeys, false), GoKeys: maskSecrets(cfg.GoKeys, false), Anonymous: cfg.Anonymous,
+		Listen: cfg.Listen, ServerKeys: maskSecrets(cfg.ServerKeys, false), ZenKeys: maskSecrets(cfg.ZenKeys, false), GoKeys: maskSecrets(cfg.GoKeys, false), CodexKeys: maskSecrets(cfg.CodexKeys, false), AntigravityKeys: maskSecrets(cfg.AntigravityKeys, false), Anonymous: cfg.Anonymous,
 		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
 		Performance: cfg.Performance, Logging: cfg.Logging, Prefer: cfg.Prefer, Reasoning: cfg.Reasoning,
 		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Listen: cfg.WebUI.Listen, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},

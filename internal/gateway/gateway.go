@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"zenflash-llm/internal/antigravity"
 	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/identity"
@@ -39,6 +40,8 @@ type Gateway struct {
 	monitor       *telemetry.Monitor
 	codexAuthPath string
 	codexNodes    atomic.Pointer[nodePool]
+	antigravityAuthPath string
+	antigravityNodes    atomic.Pointer[nodePool]
 }
 
 // codexPool returns the live codex node pool. The pool is rebuilt in place
@@ -62,6 +65,36 @@ func (g *Gateway) codexBase() string {
 
 // codexCredentials reloads the stored tokens and merges them with the
 // statically configured keys.
+func (g *Gateway) antigravityPool() *nodePool {
+	if g == nil {
+		return nil
+	}
+	return g.antigravityNodes.Load()
+}
+
+func (g *Gateway) antigravityBase() string {
+	if g.cfg.Upstream.Antigravity != "" {
+		return g.cfg.Upstream.Antigravity
+	}
+	if len(antigravity.GenerateBases) > 0 {
+		return antigravity.GenerateBases[0]
+	}
+	return "https://daily-cloudcode-pa.googleapis.com"
+}
+
+func (g *Gateway) antigravityCredentials() []codex.Credential {
+	stored, err := antigravity.LoadTokens(g.antigravityAuthPath)
+	if err != nil {
+		g.logger.Warn("antigravity credential store unreadable", "component", "antigravity", "event", "antigravity_store_unreadable", "error", err)
+	}
+	creds := antigravity.Credentials(stored, g.cfg.AntigravityKeys)
+	out := make([]codex.Credential, 0, len(creds))
+	for _, c := range creds {
+		out = append(out, codex.Credential{AccessToken: c.AccessToken, AccountID: c.ProjectID})
+	}
+	return out
+}
+
 func (g *Gateway) codexCredentials() []codex.Credential {
 	stored, err := codex.LoadTokens(g.codexAuthPath)
 	if err != nil {
@@ -95,7 +128,8 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor, con
 		anonymous:     newAnonymousPool(cfg.Anonymous, transports, cooldown),
 		catalog:       catalog,
 		monitor:       monitor,
-		codexAuthPath: codex.AuthPath(configPath),
+		codexAuthPath:       codex.AuthPath(configPath),
+		antigravityAuthPath: antigravity.AuthPath(configPath),
 	}
 	stored, err := codex.LoadTokens(g.codexAuthPath)
 	if err != nil {
@@ -106,7 +140,25 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor, con
 		return nil, fmt.Errorf("codex node pool: %w", err)
 	}
 	g.codexNodes.Store(codexNodes)
+	astored, err := antigravity.LoadTokens(g.antigravityAuthPath)
+	if err != nil {
+		g.logger.Warn("antigravity credential store unreadable", "component", "antigravity", "event", "antigravity_store_unreadable", "error", err)
+	}
+	acreds := antigravity.Credentials(astored, cfg.AntigravityKeys)
+	anodes, err := newCodexNodePool(antigravityCredentialToCodex(acreds), transports, cooldown)
+	if err != nil {
+		return nil, fmt.Errorf("antigravity node pool: %w", err)
+	}
+	g.antigravityNodes.Store(anodes)
 	return g, nil
+}
+
+func antigravityCredentialToCodex(creds []antigravity.Credential) []codex.Credential {
+	out := make([]codex.Credential, 0, len(creds))
+	for _, c := range creds {
+		out = append(out, codex.Credential{AccessToken: c.AccessToken, AccountID: c.ProjectID})
+	}
+	return out
 }
 
 func (g *Gateway) Handler() http.Handler {
@@ -175,11 +227,11 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			wire.WriteError(w, external, http.StatusBadRequest, "the model uses an upstream protocol that zenflash-llm does not expose", "invalid_request_error", "model")
 			return
 		}
-		route, err := g.catalog.Route(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.cfg.Anonymous)
+		route, err := g.catalog.RouteWithAntigravity(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 		if override, selected := debugKeyOverrideFrom(r.Context()); selected {
 			// A per-key diagnostic must not silently be served by another key,
 			// another tier or the anonymous lane.
-			route, err = g.catalog.RouteForTier(model, override.Tier, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0)
+			route, err = g.catalog.RouteForTierWithAntigravity(model, override.Tier, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0)
 		}
 		if err != nil {
 			wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", "model")
@@ -348,7 +400,7 @@ func (g *Gateway) handleSystemOne(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, "the model uses an upstream protocol that zenflash-llm does not expose", "invalid_request_error", "model")
 		return
 	}
-	route, err := g.catalog.Route(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.cfg.Anonymous)
+	route, err := g.catalog.RouteWithAntigravity(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 	if err != nil {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, err.Error(), "invalid_request_error", "model")
 		return
@@ -464,7 +516,7 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 	tiers := make([]config.Tier, 0, len(route.KeyTiers)+1)
 	seen := make(map[config.Tier]bool, len(route.KeyTiers)+1)
 	addTier := func(tier config.Tier) {
-		if (tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex) || seen[tier] {
+		if (tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex && tier != config.TierAntigravity) || seen[tier] {
 			return
 		}
 		seen[tier] = true
@@ -486,6 +538,8 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 			baseURL = g.cfg.Upstream.Go
 		case config.TierCodex:
 			baseURL = g.codexBase()
+		case config.TierAntigravity:
+			baseURL = g.antigravityBase()
 		}
 		upstreamPayload, err := wire.PrepareRequest(from, protocol, input, baseURL)
 		if err != nil {

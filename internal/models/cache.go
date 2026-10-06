@@ -17,7 +17,7 @@ import (
 	wire "zenflash-llm/internal/protocol"
 )
 
-const modelCatalogCacheSchemaVersion = 3
+const modelCatalogCacheSchemaVersion = 4
 
 var modelCatalogCacheWriteMu sync.Mutex
 
@@ -27,6 +27,7 @@ type modelCatalogCache struct {
 	Zen             []string                                 `json:"zen"`
 	Go              []string                                 `json:"go"`
 	Codex           []string                                 `json:"codex,omitempty"`
+	Antigravity     []string                                 `json:"antigravity,omitempty"`
 	NativeProtocols map[config.Tier]map[string]wire.Protocol `json:"native_protocols"`
 	Unsupported     map[config.Tier]map[string]bool          `json:"unsupported"`
 	Metadata        map[config.Tier]map[string]Metadata      `json:"metadata,omitempty"`
@@ -44,6 +45,7 @@ func (c *Catalog) LoadCache(path string) error {
 	c.zen = toSet(cache.Zen)
 	c.goModels = toSet(cache.Go)
 	c.codexModels = toSet(cache.Codex)
+	c.antigravityModels = toSet(cache.Antigravity)
 	c.nativeProtocols = cloneTierProtocols(cache.NativeProtocols)
 	c.unsupported = cloneTierBools(cache.Unsupported)
 	c.modelMeta = cloneModelMeta(cache.Metadata)
@@ -69,6 +71,7 @@ func (c *Catalog) SaveCache() error {
 		Zen:             sortedSetKeys(c.zen),
 		Go:              sortedSetKeys(c.goModels),
 		Codex:           sortedSetKeys(c.codexModels),
+		Antigravity:     sortedSetKeys(c.antigravityModels),
 		NativeProtocols: cloneTierProtocols(c.nativeProtocols),
 		Unsupported:     cloneTierBools(c.unsupported),
 		Metadata:        cloneModelMeta(c.modelMeta),
@@ -117,7 +120,8 @@ func loadModelCatalogCache(path string) (modelCatalogCache, error) {
 	cache.Zen = normalizeModelIDs(cache.Zen)
 	cache.Go = normalizeModelIDs(cache.Go)
 	cache.Codex = normalizeModelIDs(cache.Codex)
-	if len(cache.Zen) == 0 && len(cache.Go) == 0 && len(cache.Codex) == 0 {
+	cache.Antigravity = normalizeModelIDs(cache.Antigravity)
+	if len(cache.Zen) == 0 && len(cache.Go) == 0 && len(cache.Codex) == 0 && len(cache.Antigravity) == 0 {
 		return modelCatalogCache{}, errors.New("model catalog cache is empty")
 	}
 	if err := validateCatalogCapabilities(cache.NativeProtocols, cache.Unsupported); err != nil {
@@ -149,7 +153,7 @@ func normalizeModelIDs(items []string) []string {
 
 func validateCatalogCapabilities(native map[config.Tier]map[string]wire.Protocol, unsupported map[config.Tier]map[string]bool) error {
 	for tier, protocols := range native {
-		if tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex {
+		if tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex && tier != config.TierAntigravity {
 			return fmt.Errorf("model catalog cache contains unknown tier %q", tier)
 		}
 		for model, protocol := range protocols {
@@ -159,7 +163,7 @@ func validateCatalogCapabilities(native map[config.Tier]map[string]wire.Protocol
 		}
 	}
 	for tier, models := range unsupported {
-		if tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex {
+		if tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex && tier != config.TierAntigravity {
 			return fmt.Errorf("model catalog cache contains unknown tier %q", tier)
 		}
 		for model := range models {

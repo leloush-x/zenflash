@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"zenflash-llm/internal/antigravity"
 	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/httpx"
@@ -212,7 +213,7 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 	}
 
 	keyTiers := route.KeyTiers
-	if !route.Anonymous && len(keyTiers) == 0 && (route.Tier == config.TierZen || route.Tier == config.TierGo || route.Tier == config.TierCodex) {
+	if !route.Anonymous && len(keyTiers) == 0 && (route.Tier == config.TierZen || route.Tier == config.TierGo || route.Tier == config.TierCodex || route.Tier == config.TierAntigravity) {
 		keyTiers = []config.Tier{route.Tier}
 	}
 	for _, tier := range keyTiers {
@@ -558,6 +559,9 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 	case config.TierCodex:
 		nodes = g.codexPool()
 		baseURL = g.codexBase()
+	case config.TierAntigravity:
+		nodes = g.antigravityPool()
+		baseURL = g.antigravityBase()
 	}
 	node := nodes.NodeByID(override.KeyID)
 	if node == nil {
@@ -583,6 +587,7 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 	}
 	keyID := config.KeyDisplayID(node.key)
 	setRequestCredential(ctx, override.Tier, keyID, "key", false, proxy)
+	started := time.Now()
 	var req *http.Request
 	var err error
 	if override.Tier == config.TierCodex {
@@ -591,13 +596,31 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 			meta.Shaped = true
 		}
 		req, err = codex.NewUpstreamRequest(ctx, baseURL, body, node.accountID, node.key, true)
+	} else if override.Tier == config.TierAntigravity {
+		var envelope []byte
+		var wireModel string
+		envelope, wireModel, err = antigravity.BuildGenerateRequest(body, route.ID, node.accountID)
+		if err == nil {
+			var aresp *http.Response
+			aresp, err = antigravity.ExecuteGenerate(ctx, proxy.client, baseURL, node.accountID, node.key, wireModel, envelope)
+			if err == nil {
+				g.observeKeyResult(ctx, nodes, node, proxy, aresp, nil)
+				g.recordUpstreamAttempt(ctx, route, ids, attemptOffset+1, keyID, "key", false, proxy, aresp, nil, time.Since(started))
+				if antigravity.WantsStream(body) {
+					raw, _ := io.ReadAll(aresp.Body)
+					httpx.DrainAndClose(aresp.Body)
+					return antigravity.ToStreamResponse(raw), nil, 1
+				}
+				return aresp, nil, 1
+			}
+			return nil, err, 1
+		}
 	} else {
 		req, err = newUpstreamRequest(ctx, baseURL, route.ProtocolFor(override.Tier), body, ids, node.key)
 	}
 	if err != nil {
 		return nil, err, 0
 	}
-	started := time.Now()
 	resp, err := proxy.client.Do(req)
 	duration := time.Since(started)
 	g.recordUpstreamAttempt(ctx, route, ids, attemptOffset+1, keyID, "key", false, proxy, resp, err, duration)
@@ -619,6 +642,9 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 	case config.TierCodex:
 		nodes = g.codexPool()
 		baseURL = g.codexBase()
+	case config.TierAntigravity:
+		nodes = g.antigravityPool()
+		baseURL = g.antigravityBase()
 	}
 	cursor := nodes.CursorFor(ids.Session)
 	if nodes.Len() == 0 {
@@ -664,6 +690,47 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 			httpx.DrainAndClose(lastResponse.Body)
 			lastResponse = nil
 		}
+		proxy := nodes.Proxy(node)
+		if proxy == nil {
+			lastErr = errors.New("upstream key has no proxy binding")
+			break
+		}
+		keyID := config.KeyDisplayID(node.key)
+		setRequestCredential(ctx, route.Tier, keyID, "key", false, proxy)
+		if route.Tier == config.TierAntigravity {
+			envelope, wireModel, buildErr := antigravity.BuildGenerateRequest(body, route.ID, node.accountID)
+			if buildErr != nil {
+				return nil, buildErr, attempts
+			}
+			_ = wireModel
+			attemptStarted := time.Now()
+			resp, execErr := antigravity.ExecuteGenerate(ctx, proxy.client, baseURL, node.accountID, node.key, route.ID, envelope)
+			attemptDuration := time.Since(attemptStarted)
+			if ctx.Err() != nil {
+				lastResponse, lastErr = resp, execErr
+				if lastErr == nil && lastResponse == nil {
+					lastErr = ctx.Err()
+				}
+				break
+			}
+			g.observeKeyResult(ctx, nodes, node, proxy, resp, execErr)
+			g.recordUpstreamAttempt(ctx, route, ids, attemptOffset+attempts, keyID, "key", false, proxy, resp, execErr, attemptDuration)
+			if execErr == nil && resp != nil && resp.StatusCode/100 == 2 {
+				g.logger.Debug("upstream accepted request", "component", "upstream", "event", "attempt_succeeded", "request_id", ids.Request, "attempt", attempts, "tier", route.Tier, "key_id", keyID, "proxy", config.RedactURL(proxy.name), "status", resp.StatusCode, "duration_ms", attemptDuration.Milliseconds())
+				if antigravity.WantsStream(body) {
+					raw, _ := io.ReadAll(resp.Body)
+					httpx.DrainAndClose(resp.Body)
+					return antigravity.ToStreamResponse(raw), nil, attempts
+				}
+				return resp, nil, attempts
+			}
+			if isNonRetryableClientResponse(resp, execErr) {
+				return resp, nil, attempts
+			}
+			lastResponse = resp
+			lastErr = execErr
+			continue
+		}
 		var req *http.Request
 		var err error
 		if route.Tier == config.TierCodex {
@@ -674,13 +741,6 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		if err != nil {
 			return nil, err, attempts
 		}
-		proxy := nodes.Proxy(node)
-		if proxy == nil {
-			lastErr = errors.New("upstream key has no proxy binding")
-			break
-		}
-		keyID := config.KeyDisplayID(node.key)
-		setRequestCredential(ctx, route.Tier, keyID, "key", false, proxy)
 		attemptStarted := time.Now()
 		resp, err := proxy.client.Do(req)
 		attemptDuration := time.Since(attemptStarted)

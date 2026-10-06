@@ -39,15 +39,16 @@ func NewSecretRedactor() *SecretRedactor {
 }
 
 func (r *SecretRedactor) Replace(cfg Config) {
-	values := make([]string, 0, len(cfg.ServerKeys)+len(cfg.ZenKeys)+len(cfg.GoKeys)+len(cfg.CodexKeys)+2)
+	values := make([]string, 0, len(cfg.ServerKeys)+len(cfg.ZenKeys)+len(cfg.GoKeys)+len(cfg.CodexKeys)+len(cfg.AntigravityKeys)+2)
 	values = append(values, cfg.ServerKeys...)
 	values = append(values, cfg.ZenKeys...)
 	values = append(values, cfg.GoKeys...)
 	values = append(values, cfg.CodexKeys...)
+	values = append(values, cfg.AntigravityKeys...)
 	if cfg.WebUI.Password != "" {
 		values = append(values, cfg.WebUI.Password)
 	}
-	for _, value := range []string{cfg.Upstream.Zen, cfg.Upstream.Go, cfg.Upstream.Codex} {
+	for _, value := range []string{cfg.Upstream.Zen, cfg.Upstream.Go, cfg.Upstream.Codex, cfg.Upstream.Antigravity} {
 		if parsed, err := url.Parse(value); err == nil && parsed.User != nil {
 			values = append(values, value, parsed.User.Username())
 			if password, ok := parsed.User.Password(); ok {

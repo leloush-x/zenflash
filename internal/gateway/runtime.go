@@ -119,6 +119,7 @@ func (m *RuntimeManager) start(runtime *gatewayRuntime) {
 	runtime.gateway.StartProxyHealthChecks(runtimeCtx)
 	runtime.gateway.StartModelRefresh(runtimeCtx)
 	runtime.gateway.StartCodexTokenRefresh(runtimeCtx)
+	runtime.gateway.StartAntigravityTokenRefresh(runtimeCtx)
 }
 
 func (m *RuntimeManager) Handler() http.Handler {
@@ -259,9 +260,10 @@ type ProxyStatus struct {
 	Address   string `json:"address"`
 	Healthy   bool   `json:"healthy"`
 	Checking  bool   `json:"checking"`
-	ZenKeys   int    `json:"zen_keys"`
-	GoKeys    int    `json:"go_keys"`
-	CodexKeys int    `json:"codex_keys"`
+	ZenKeys         int    `json:"zen_keys"`
+	GoKeys          int    `json:"go_keys"`
+	CodexKeys       int    `json:"codex_keys"`
+	AntigravityKeys int    `json:"antigravity_keys,omitempty"`
 	Anonymous bool   `json:"anonymous"`
 }
 
@@ -279,6 +281,9 @@ func (m *RuntimeManager) Resources() ResourceSnapshot {
 	if codexPool := gateway.codexPool(); codexPool != nil {
 		result.Keys = append(result.Keys, keyStatuses("codex", codexPool)...)
 	}
+	if antigravityPool := gateway.antigravityPool(); antigravityPool != nil {
+		result.Keys = append(result.Keys, keyStatuses("antigravity", antigravityPool)...)
+	}
 	gateway.zenNodes.bindingsMu.Lock()
 	zenBindings := append([]int(nil), gateway.zenNodes.bindingCount...)
 	gateway.zenNodes.bindingsMu.Unlock()
@@ -291,6 +296,12 @@ func (m *RuntimeManager) Resources() ResourceSnapshot {
 		codexBindings = append([]int(nil), codexPool.bindingCount...)
 		codexPool.bindingsMu.Unlock()
 	}
+	var antigravityBindings []int
+	if antigravityPool := gateway.antigravityPool(); antigravityPool != nil {
+		antigravityPool.bindingsMu.Lock()
+		antigravityBindings = append([]int(nil), antigravityPool.bindingCount...)
+		antigravityPool.bindingsMu.Unlock()
+	}
 	for _, proxy := range gateway.transports.items {
 		status := ProxyStatus{Index: proxy.index, Address: config.RedactURL(proxy.name), Healthy: proxy.healthy.Load(), Checking: proxy.checking.Load(), Anonymous: gateway.cfg.Anonymous}
 		if proxy.index < len(zenBindings) {
@@ -301,6 +312,9 @@ func (m *RuntimeManager) Resources() ResourceSnapshot {
 		}
 		if proxy.index < len(codexBindings) {
 			status.CodexKeys = codexBindings[proxy.index]
+		}
+		if proxy.index < len(antigravityBindings) {
+			status.AntigravityKeys = antigravityBindings[proxy.index]
 		}
 		result.Proxies = append(result.Proxies, status)
 	}
@@ -316,7 +330,7 @@ func (m *RuntimeManager) DebugModels() ([]modelcatalog.RouteDiagnostic, modelcat
 	models := gateway.catalog.List()
 	result := make([]modelcatalog.RouteDiagnostic, 0, len(models))
 	for _, model := range models {
-		result = append(result, gateway.catalog.Diagnostic(model, "", len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.cfg.Anonymous))
+		result = append(result, gateway.catalog.DiagnosticWithAntigravity(model, "", len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous))
 	}
 	metadata := gateway.catalog.MetadataSnapshot()
 	return result, metadata
@@ -328,7 +342,7 @@ func (m *RuntimeManager) DebugRoute(model string, requested protocol.Protocol) m
 		return modelcatalog.RouteDiagnostic{Model: model, RequestedProtocol: requested, RouteError: "gateway runtime is unavailable"}
 	}
 	gateway := runtime.gateway
-	return gateway.catalog.Diagnostic(model, requested, len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.cfg.Anonymous)
+	return gateway.catalog.DiagnosticWithAntigravity(model, requested, len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous)
 }
 
 // DebugKeyView is the operator-facing view of one configured upstream key. It
@@ -345,7 +359,7 @@ type DebugKeyView struct {
 // DebugKeys lists every configured upstream key per tier so the Playground can
 // offer an explicit per-key test target.
 func (m *RuntimeManager) DebugKeys() map[string][]DebugKeyView {
-	result := map[string][]DebugKeyView{"zen": {}, "go": {}, "codex": {}}
+	result := map[string][]DebugKeyView{"zen": {}, "go": {}, "codex": {}, "antigravity": {}}
 	runtime := m.current.Load()
 	if runtime == nil {
 		return result
@@ -366,6 +380,7 @@ func (m *RuntimeManager) DebugKeys() map[string][]DebugKeyView {
 	appendKeys(config.TierZen, runtime.gateway.zenNodes.nodes)
 	appendKeys(config.TierGo, runtime.gateway.goNodes.nodes)
 	appendKeys(config.TierCodex, runtime.gateway.codexPool().nodes)
+	appendKeys(config.TierAntigravity, runtime.gateway.antigravityPool().nodes)
 	return result
 }
 
@@ -387,8 +402,9 @@ func (m *RuntimeManager) DebugRouteForTier(model string, tier config.Tier) (mode
 	}
 	gateway := runtime.gateway
 	hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0
-	diagnostic := gateway.catalog.Diagnostic(model, "", hasZen, hasGo, hasCodex, false)
-	route, err := gateway.catalog.RouteForTier(model, tier, hasZen, hasGo, hasCodex)
+	hasAntigravity := gateway.antigravityPool().Len() > 0
+	diagnostic := gateway.catalog.DiagnosticWithAntigravity(model, "", hasZen, hasGo, hasCodex, hasAntigravity, false)
+	route, err := gateway.catalog.RouteForTierWithAntigravity(model, tier, hasZen, hasGo, hasCodex, hasAntigravity)
 	if err != nil {
 		diagnostic.RouteError = err.Error()
 		return diagnostic, err
@@ -411,4 +427,51 @@ func keyStatuses(tier string, pool *nodePool) []KeyStatus {
 		result = append(result, status)
 	}
 	return result
+}
+
+// OAuthAccounts lists stored Codex + Antigravity credentials for the dashboard.
+func (m *RuntimeManager) OAuthAccounts() []OAuthAccount {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return []OAuthAccount{}
+	}
+	accounts, _ := runtime.gateway.OAuthAccounts()
+	if accounts == nil {
+		return []OAuthAccount{}
+	}
+	return accounts
+}
+
+// ImportOAuthToken validates a pasted refresh token and stores it.
+func (m *RuntimeManager) ImportOAuthToken(ctx context.Context, provider, refreshToken string) (OAuthAccount, error) {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return OAuthAccount{}, fmt.Errorf("gateway runtime is unavailable")
+	}
+	switch provider {
+	case "codex":
+		return runtime.gateway.ImportCodexRefreshToken(ctx, refreshToken)
+	case "antigravity":
+		return runtime.gateway.ImportAntigravityRefreshToken(ctx, refreshToken)
+	default:
+		return OAuthAccount{}, fmt.Errorf("unknown provider %q", provider)
+	}
+}
+
+// DeleteOAuthAccount removes one stored credential.
+func (m *RuntimeManager) DeleteOAuthAccount(provider, id string) error {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return fmt.Errorf("gateway runtime is unavailable")
+	}
+	return runtime.gateway.DeleteOAuthAccount(provider, id)
+}
+
+// RefreshOAuthAccounts forces an immediate token refresh.
+func (m *RuntimeManager) RefreshOAuthAccounts(ctx context.Context) {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return
+	}
+	runtime.gateway.RefreshOAuthAccounts(ctx)
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"zenflash-llm/internal/antigravity"
 	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	modelcatalog "zenflash-llm/internal/models"
@@ -76,8 +77,12 @@ func (g *Gateway) rebindUnavailableProxy(proxy *proxyTransport, wasHealthy bool)
 	if pool := g.codexPool(); pool != nil {
 		codexMoved = pool.RebindProxy(proxy.index)
 	}
-	if wasHealthy || zenMoved+goMoved+codexMoved > 0 {
-		g.logger.Warn("proxy became unavailable", "component", "proxy", "event", "proxy_unavailable", "proxy", config.RedactURL(proxy.name), "zen_keys_moved", zenMoved, "go_keys_moved", goMoved, "codex_keys_moved", codexMoved)
+	antigravityMoved := 0
+	if pool := g.antigravityPool(); pool != nil {
+		antigravityMoved = pool.RebindProxy(proxy.index)
+	}
+	if wasHealthy || zenMoved+goMoved+codexMoved+antigravityMoved > 0 {
+		g.logger.Warn("proxy became unavailable", "component", "proxy", "event", "proxy_unavailable", "proxy", config.RedactURL(proxy.name), "zen_keys_moved", zenMoved, "go_keys_moved", goMoved, "codex_keys_moved", codexMoved, "antigravity_keys_moved", antigravityMoved)
 	}
 	return zenMoved, goMoved
 }
@@ -92,8 +97,12 @@ func (g *Gateway) restoreProxy(proxy *proxyTransport) (zenMoved, goMoved int) {
 	if pool := g.codexPool(); pool != nil {
 		codexMoved = pool.RestoreProxy(proxy.index)
 	}
-	if zenMoved+goMoved+codexMoved > 0 {
-		g.logger.Info("proxy connectivity restored", "component", "proxy", "event", "proxy_restored", "proxy", config.RedactURL(proxy.name), "zen_keys_moved", zenMoved, "go_keys_moved", goMoved, "codex_keys_moved", codexMoved)
+	antigravityMoved := 0
+	if pool := g.antigravityPool(); pool != nil {
+		antigravityMoved = pool.RestoreProxy(proxy.index)
+	}
+	if zenMoved+goMoved+codexMoved+antigravityMoved > 0 {
+		g.logger.Info("proxy connectivity restored", "component", "proxy", "event", "proxy_restored", "proxy", config.RedactURL(proxy.name), "zen_keys_moved", zenMoved, "go_keys_moved", goMoved, "codex_keys_moved", codexMoved, "antigravity_keys_moved", antigravityMoved)
 	}
 	return zenMoved, goMoved
 }
@@ -143,14 +152,15 @@ func (g *Gateway) applyProxyHealthResult(result proxyHealthResult, source string
 
 func (g *Gateway) StartModelRefresh(ctx context.Context) {
 	refresh := func() {
-		var zen, goModels, codexModels []string
+		var zen, goModels, codexModels, antigravityModels []string
 		var capabilities modelcatalog.Capabilities
 		var capabilitiesErr error
 		var wg sync.WaitGroup
-		wg.Add(4)
+		wg.Add(5)
 		go func() { defer wg.Done(); zen = g.refreshZen(ctx) }()
 		go func() { defer wg.Done(); goModels = g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes) }()
 		go func() { defer wg.Done(); codexModels = g.refreshCodexModels(ctx) }()
+		go func() { defer wg.Done(); antigravityModels = g.refreshAntigravityModels(ctx) }()
 		go func() {
 			defer wg.Done()
 			capabilityCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -165,7 +175,7 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 			g.logger.Warn("OpenCode capability catalog refresh failed", "component", "models", "event", "capability_refresh_failed", "error", capabilitiesErr)
 		}
 		if capabilities.Protocols == nil {
-			capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}}
+			capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 		}
 		if goModels != nil {
 			if capabilities.Protocols[config.TierGo] == nil {
@@ -177,9 +187,19 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 				}
 			}
 		}
+		if antigravityModels != nil {
+			if capabilities.Protocols[config.TierAntigravity] == nil {
+				capabilities.Protocols[config.TierAntigravity] = map[string]wire.Protocol{}
+			}
+			for _, model := range antigravityModels {
+				if _, ok := capabilities.Protocols[config.TierAntigravity][model]; !ok {
+					capabilities.Protocols[config.TierAntigravity][model] = wire.Chat
+				}
+			}
+		}
 		if codexModels != nil {
 			if capabilities.Protocols == nil {
-				capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}}
+				capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 			}
 			if capabilities.Protocols[config.TierCodex] == nil {
 				capabilities.Protocols[config.TierCodex] = map[string]wire.Protocol{}
@@ -190,8 +210,8 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 				}
 			}
 		}
-		if zen != nil || goModels != nil || codexModels != nil {
-			g.catalog.ReplaceWithCapabilities(zen, goModels, codexModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
+		if zen != nil || goModels != nil || codexModels != nil || antigravityModels != nil {
+			g.catalog.ReplaceWithCapabilities(zen, goModels, codexModels, antigravityModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
 			if ctx.Err() == nil {
 				if err := g.catalog.SaveCache(); err != nil {
 					g.logger.Warn("model catalog cache write failed", "component", "models", "event", "catalog_cache_write_failed", "error", err)
@@ -367,5 +387,77 @@ func (g *Gateway) refreshCodexTokens(ctx context.Context) {
 	nodes, err := newCodexNodePool(g.codexCredentials(), g.transports, time.Duration(g.cfg.Performance.FailureCooldownSeconds)*time.Second)
 	if err == nil {
 		g.codexNodes.Store(nodes)
+	}
+}
+
+// refreshAntigravityModels lists models via Cloud Code fetchAvailableModels.
+func (g *Gateway) refreshAntigravityModels(ctx context.Context) []string {
+	nodes := g.antigravityPool()
+	if nodes == nil || nodes.Len() == 0 {
+		return nil
+	}
+	cursor := nodes.Cursor()
+	for attempt := 0; attempt < g.cfg.Retry.MaxAttempts; attempt++ {
+		node := cursor.Next()
+		if node == nil {
+			return nil
+		}
+		refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		proxy := nodes.Proxy(node)
+		if proxy == nil {
+			cancel()
+			return nil
+		}
+		models, err := antigravity.FetchModels(refreshCtx, proxy.client, node.key, node.accountID)
+		status := 0
+		if err == nil {
+			status = 200
+		}
+		g.syncProxyResult(refreshCtx, proxy, status, err)
+		cancel()
+		if err == nil {
+			nodes.MarkSuccess(node)
+			return models
+		}
+		nodes.MarkFailure(node, nil, err)
+		g.logger.Debug("antigravity model catalog refresh attempt failed", "component", "models", "event", "antigravity_refresh_attempt_failed", "attempt", attempt+1, "error", err)
+	}
+	g.logger.Warn("antigravity model catalog refresh failed", "component", "models", "event", "antigravity_refresh_failed")
+	return nil
+}
+
+// StartAntigravityTokenRefresh periodically renews stored Antigravity bearers.
+func (g *Gateway) StartAntigravityTokenRefresh(ctx context.Context) {
+	go func() {
+		g.refreshAntigravityTokens(ctx)
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				g.refreshAntigravityTokens(ctx)
+			}
+		}
+	}()
+}
+
+func (g *Gateway) refreshAntigravityTokens(ctx context.Context) {
+	client := &http.Client{Timeout: 60 * time.Second}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	_, changed, err := antigravity.RefreshStale(ctx, client, g.antigravityAuthPath)
+	if err != nil {
+		g.logger.Warn("antigravity token refresh failed", "component", "antigravity", "event", "antigravity_token_refresh_failed", "error", err)
+		return
+	}
+	if !changed {
+		return
+	}
+	g.logger.Info("antigravity tokens refreshed", "component", "antigravity", "event", "antigravity_tokens_refreshed")
+	nodes, err := newCodexNodePool(g.antigravityCredentials(), g.transports, time.Duration(g.cfg.Performance.FailureCooldownSeconds)*time.Second)
+	if err == nil {
+		g.antigravityNodes.Store(nodes)
 	}
 }

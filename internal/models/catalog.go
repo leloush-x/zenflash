@@ -40,6 +40,7 @@ type RouteDiagnostic struct {
 	AvailableZen         bool                          `json:"available_zen"`
 	AvailableGo          bool                          `json:"available_go"`
 	AvailableCodex       bool                          `json:"available_codex"`
+	AvailableAntigravity bool                         `json:"available_antigravity,omitempty"`
 	Tier                 config.Tier                   `json:"tier,omitempty"`
 	Anonymous            bool                          `json:"anonymous"`
 	KeyID                string                        `json:"key_id,omitempty"`
@@ -55,6 +56,7 @@ type Catalog struct {
 	zen         map[string]bool
 	goModels    map[string]bool
 	codexModels map[string]bool
+	antigravityModels map[string]bool
 	protocols   map[string]wire.Protocol
 	// nativeProtocols is populated from OpenCode's public model capability
 	// catalog. protocols remains the user-configured override map.
@@ -74,6 +76,7 @@ type CatalogSnapshot struct {
 	Zen         int       `json:"zen"`
 	Go          int       `json:"go"`
 	Codex       int       `json:"codex"`
+	Antigravity int       `json:"antigravity,omitempty"`
 	Total       int       `json:"total"`
 	Exposed     int       `json:"exposed"`
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
@@ -87,7 +90,7 @@ func NewCatalog(prefer config.Tier, overrides map[string]string) *Catalog {
 		protocols[model] = wire.Protocol(protocol)
 	}
 	return &Catalog{
-		zen: map[string]bool{}, goModels: map[string]bool{}, codexModels: map[string]bool{}, protocols: protocols,
+		zen: map[string]bool{}, goModels: map[string]bool{}, codexModels: map[string]bool{}, antigravityModels: map[string]bool{}, protocols: protocols,
 		nativeProtocols: allTierProtocolMaps(),
 		unsupported:     allTierBoolMaps(), prefer: prefer,
 		cacheSource: "none",
@@ -131,26 +134,30 @@ func (c *Catalog) SetRefreshInterval(interval time.Duration) {
 }
 
 func allTiers() []config.Tier {
-	return []config.Tier{config.TierZen, config.TierGo, config.TierCodex}
+	return []config.Tier{config.TierZen, config.TierGo, config.TierCodex, config.TierAntigravity}
 }
 
 func allTierProtocolMaps() map[config.Tier]map[string]wire.Protocol {
-	return map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}}
+	return map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 }
 
 func allTierBoolMaps() map[config.Tier]map[string]bool {
-	return map[config.Tier]map[string]bool{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}}
+	return map[config.Tier]map[string]bool{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 }
 
 func allTierMetaMaps() map[config.Tier]map[string]Metadata {
-	return map[config.Tier]map[string]Metadata{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}}
+	return map[config.Tier]map[string]Metadata{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 }
 
 func (c *Catalog) Replace(zen, goModels, codexModels []string) {
-	c.ReplaceWithCapabilities(zen, goModels, codexModels, nil, nil, nil)
+	c.ReplaceWithCapabilities(zen, goModels, codexModels, nil, nil, nil, nil)
 }
 
-func (c *Catalog) ReplaceWithCapabilities(zen, goModels, codexModels []string, native map[config.Tier]map[string]wire.Protocol, unsupported map[config.Tier]map[string]bool, metadata map[config.Tier]map[string]Metadata) {
+func (c *Catalog) ReplaceWithAntigravity(zen, goModels, codexModels, antigravityModels []string) {
+	c.ReplaceWithCapabilities(zen, goModels, codexModels, antigravityModels, nil, nil, nil)
+}
+
+func (c *Catalog) ReplaceWithCapabilities(zen, goModels, codexModels, antigravityModels []string, native map[config.Tier]map[string]wire.Protocol, unsupported map[config.Tier]map[string]bool, metadata map[config.Tier]map[string]Metadata) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if zen != nil {
@@ -161,6 +168,9 @@ func (c *Catalog) ReplaceWithCapabilities(zen, goModels, codexModels []string, n
 	}
 	if codexModels != nil {
 		c.codexModels = toSet(codexModels)
+	}
+	if antigravityModels != nil {
+		c.antigravityModels = toSet(antigravityModels)
 	}
 	if native != nil {
 		for _, tier := range allTiers() {
@@ -192,6 +202,7 @@ func (c *Catalog) CopyState(source *Catalog) {
 	zen := make(map[string]bool, len(source.zen))
 	goModels := make(map[string]bool, len(source.goModels))
 	codexModels := make(map[string]bool, len(source.codexModels))
+	antigravityModels := make(map[string]bool, len(source.antigravityModels))
 	for model, available := range source.zen {
 		zen[model] = available
 	}
@@ -200,6 +211,9 @@ func (c *Catalog) CopyState(source *Catalog) {
 	}
 	for model, available := range source.codexModels {
 		codexModels[model] = available
+	}
+	for model, available := range source.antigravityModels {
+		antigravityModels[model] = available
 	}
 	native := allTierProtocolMaps()
 	unsupported := allTierBoolMaps()
@@ -217,26 +231,30 @@ func (c *Catalog) CopyState(source *Catalog) {
 	stale := source.stale
 	source.mu.RUnlock()
 	c.mu.Lock()
-	c.zen, c.goModels, c.codexModels, c.nativeProtocols, c.unsupported, c.updatedAt = zen, goModels, codexModels, native, unsupported, updatedAt
+	c.zen, c.goModels, c.codexModels, c.antigravityModels, c.nativeProtocols, c.unsupported, c.updatedAt = zen, goModels, codexModels, antigravityModels, native, unsupported, updatedAt
 	c.modelMeta = meta
 	c.cacheSource, c.stale = cacheSource, stale
 	c.mu.Unlock()
 }
 
 func (c *Catalog) Route(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonymous bool) (Route, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.routeLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonymous)
+	return c.RouteWithAntigravity(model, hasZenKeys, hasGoKeys, hasCodexKeys, false, hasAnonymous)
 }
 
-func (c *Catalog) routeLocked(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonymous bool) (Route, error) {
-	keyTiers := c.keyTierOrderLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys)
+func (c *Catalog) RouteWithAntigravity(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) (Route, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.routeLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
+}
+
+func (c *Catalog) routeLocked(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) (Route, error) {
+	keyTiers := c.keyTierOrderLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys)
 	// OpenCode's public credential is a Zen-only lane. Every free model starts
 	// there, even if the current catalog only advertises it on Go: an upstream
 	// rejection will move the request into the authenticated fallback plan.
 	decision := c.anonymousDecision(model)
 	if hasAnonymous && decision.Allowed && (c.protocols[model] != "" || !c.unsupported[config.TierZen][model]) &&
-		(len(c.zen) == 0 && len(c.goModels) == 0 || c.zen[model] || c.goModels[model]) {
+		(len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0 || c.zen[model] || c.goModels[model]) {
 		protocols := c.protocolsForLocked(model, keyTiers, true)
 		return Route{ID: model, Tier: config.TierZen, Protocol: protocols[config.TierZen], Protocols: protocols, Anonymous: true, KeyTiers: keyTiers}, nil
 	}
@@ -244,7 +262,7 @@ func (c *Catalog) routeLocked(model string, hasZenKeys, hasGoKeys, hasCodexKeys,
 		protocols := c.protocolsForLocked(model, keyTiers, false)
 		return Route{ID: model, Tier: keyTiers[0], Protocol: protocols[keyTiers[0]], Protocols: protocols, KeyTiers: keyTiers}, nil
 	}
-	return Route{}, fmt.Errorf("model %q is not available in the configured Zen, Go, or Codex pools", model)
+	return Route{}, fmt.Errorf("model %q is not available in the configured Zen, Go, Codex, or Antigravity pools", model)
 }
 
 func (r Route) ProtocolFor(tier config.Tier) wire.Protocol {
@@ -276,6 +294,10 @@ func (c *Catalog) protocolForLocked(model string, tier config.Tier) wire.Protoco
 		// The Codex backend only speaks the Responses protocol.
 		return wire.Responses
 	}
+	if tier == config.TierAntigravity {
+		// Cloud Code speaks Gemini; the gateway normalizes to Chat internally.
+		return wire.Chat
+	}
 	// The OpenCode capability catalog is authoritative when available. Chat is
 	// the only safe protocol-neutral fallback for an ID that has just appeared
 	// in /v1/models but is not present in the capability snapshot yet.
@@ -286,8 +308,8 @@ func (c *Catalog) protocolForLocked(model string, tier config.Tier) wire.Protoco
 // included only when it has a key and advertises the model. Before the first
 // successful catalog refresh, configured key pools remain usable so temporary
 // discovery failures do not take the gateway offline.
-func (c *Catalog) keyTierOrderLocked(model string, hasZenKeys, hasGoKeys, hasCodexKeys bool) []config.Tier {
-	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0
+func (c *Catalog) keyTierOrderLocked(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys bool) []config.Tier {
+	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
 	available := func(tier config.Tier) bool {
 		switch tier {
 		case config.TierZen:
@@ -296,6 +318,8 @@ func (c *Catalog) keyTierOrderLocked(model string, hasZenKeys, hasGoKeys, hasCod
 			return hasGoKeys && (catalogPending || c.goModels[model]) && c.tierSupportedLocked(model, config.TierGo)
 		case config.TierCodex:
 			return hasCodexKeys && (catalogPending || c.codexModels[model]) && c.tierSupportedLocked(model, config.TierCodex)
+		case config.TierAntigravity:
+			return hasAntigravityKeys && (catalogPending || c.antigravityModels[model]) && c.tierSupportedLocked(model, config.TierAntigravity)
 		default:
 			return false
 		}
@@ -304,7 +328,9 @@ func (c *Catalog) keyTierOrderLocked(model string, hasZenKeys, hasGoKeys, hasCod
 	if c.prefer == config.TierGo {
 		order[0], order[1] = order[1], order[0]
 	} else if c.prefer == config.TierCodex {
-		order = []config.Tier{config.TierCodex, config.TierZen, config.TierGo}
+		order = []config.Tier{config.TierCodex, config.TierZen, config.TierGo, config.TierAntigravity}
+	} else if c.prefer == config.TierAntigravity {
+		order = []config.Tier{config.TierAntigravity, config.TierZen, config.TierGo, config.TierCodex}
 	}
 	result := make([]config.Tier, 0, len(order))
 	for _, tier := range order {
@@ -320,8 +346,12 @@ func (c *Catalog) keyTierOrderLocked(model string, hasZenKeys, hasGoKeys, hasCod
 // fallback tier: the operator asked to exercise one configured key, so the
 // result describes that key and nothing else.
 func (c *Catalog) RouteForTier(model string, tier config.Tier, hasZenKeys, hasGoKeys, hasCodexKeys bool) (Route, error) {
-	if tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex {
-		return Route{}, errors.New("selected key tier must be zen, go, or codex")
+	return c.RouteForTierWithAntigravity(model, tier, hasZenKeys, hasGoKeys, hasCodexKeys, false)
+}
+
+func (c *Catalog) RouteForTierWithAntigravity(model string, tier config.Tier, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys bool) (Route, error) {
+	if tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex && tier != config.TierAntigravity {
+		return Route{}, errors.New("selected key tier must be zen, go, codex, or antigravity")
 	}
 	hasKeys := hasZenKeys
 	switch tier {
@@ -329,19 +359,23 @@ func (c *Catalog) RouteForTier(model string, tier config.Tier, hasZenKeys, hasGo
 		hasKeys = hasGoKeys
 	case config.TierCodex:
 		hasKeys = hasCodexKeys
+	case config.TierAntigravity:
+		hasKeys = hasAntigravityKeys
 	}
 	if !hasKeys {
 		return Route{}, fmt.Errorf("no %s key is configured", tier)
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0
+	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
 	advertised := c.zen[model]
 	switch tier {
 	case config.TierGo:
 		advertised = c.goModels[model]
 	case config.TierCodex:
 		advertised = c.codexModels[model]
+	case config.TierAntigravity:
+		advertised = c.antigravityModels[model]
 	}
 	if !catalogPending && !advertised {
 		return Route{}, fmt.Errorf("model %q is not available in the selected %s key tier", model, tier)
@@ -374,22 +408,28 @@ func (c *Catalog) IsFreeModel(model string) bool {
 }
 
 func (c *Catalog) Diagnostic(model string, requested wire.Protocol, hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonymous bool) RouteDiagnostic {
+	return c.DiagnosticWithAntigravity(model, requested, hasZenKeys, hasGoKeys, hasCodexKeys, false, hasAnonymous)
+}
+
+func (c *Catalog) DiagnosticWithAntigravity(model string, requested wire.Protocol, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) RouteDiagnostic {
 	c.mu.RLock()
 	configured, explicit := c.protocols[model]
-	zen, goModel, codexModel := c.zen[model], c.goModels[model], c.codexModels[model]
+	zen, goModel, codexModel, antigravityModel := c.zen[model], c.goModels[model], c.codexModels[model], c.antigravityModels[model]
 	nativeProtocols := map[config.Tier]wire.Protocol{
-		config.TierZen:   c.protocolForLocked(model, config.TierZen),
-		config.TierGo:    c.protocolForLocked(model, config.TierGo),
-		config.TierCodex: c.protocolForLocked(model, config.TierCodex),
+		config.TierZen:         c.protocolForLocked(model, config.TierZen),
+		config.TierGo:          c.protocolForLocked(model, config.TierGo),
+		config.TierCodex:       c.protocolForLocked(model, config.TierCodex),
+		config.TierAntigravity: c.protocolForLocked(model, config.TierAntigravity),
 	}
 	_, zenKnown := c.nativeProtocols[config.TierZen][model]
 	_, goKnown := c.nativeProtocols[config.TierGo][model]
 	_, codexKnown := c.nativeProtocols[config.TierCodex][model]
+	_, antigravityKnown := c.nativeProtocols[config.TierAntigravity][model]
 	c.mu.RUnlock()
 	source := "configured"
 	if !explicit {
 		source = "default"
-		if zenKnown || goKnown || codexKnown {
+		if zenKnown || goKnown || codexKnown || antigravityKnown {
 			source = "upstream"
 		}
 	}
@@ -402,13 +442,15 @@ func (c *Catalog) Diagnostic(model string, requested wire.Protocol, hasZenKeys, 
 			protocol = nativeProtocols[config.TierGo]
 		} else if c.prefer == config.TierCodex {
 			protocol = nativeProtocols[config.TierCodex]
+		} else if c.prefer == config.TierAntigravity {
+			protocol = nativeProtocols[config.TierAntigravity]
 		}
 	}
 	diagnostic := RouteDiagnostic{
 		Model: model, RequestedProtocol: requested, NativeProtocol: protocol, NativeProtocols: nativeProtocols, ProtocolSource: source,
-		AvailableZen: zen, AvailableGo: goModel, AvailableCodex: codexModel, AnonymousEligibility: c.anonymousDecision(model),
+		AvailableZen: zen, AvailableGo: goModel, AvailableCodex: codexModel, AvailableAntigravity: antigravityModel, AnonymousEligibility: c.anonymousDecision(model),
 	}
-	route, err := c.Route(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonymous)
+	route, err := c.RouteWithAntigravity(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
 	if err != nil {
 		diagnostic.RouteError = err.Error()
 		return diagnostic
@@ -438,7 +480,7 @@ func (c *Catalog) List() []string {
 }
 
 func (c *Catalog) modelIDsLocked() []string {
-	seen := make(map[string]bool, len(c.zen)+len(c.goModels)+len(c.codexModels))
+	seen := make(map[string]bool, len(c.zen)+len(c.goModels)+len(c.codexModels)+len(c.antigravityModels))
 	for model := range c.zen {
 		seen[model] = true
 	}
@@ -446,6 +488,9 @@ func (c *Catalog) modelIDsLocked() []string {
 		seen[model] = true
 	}
 	for model := range c.codexModels {
+		seen[model] = true
+	}
+	for model := range c.antigravityModels {
 		seen[model] = true
 	}
 	return sortedSetKeys(seen)
@@ -460,6 +505,10 @@ func (c *Catalog) Snapshot() CatalogSnapshot {
 // AvailableModels provides discovery and readiness with the same route
 // filtering, including configured key tiers and anonymous eligibility.
 func (c *Catalog) AvailableModels(hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonymous bool) ([]Route, CatalogSnapshot) {
+	return c.AvailableModelsWithAntigravity(hasZenKeys, hasGoKeys, hasCodexKeys, false, hasAnonymous)
+}
+
+func (c *Catalog) AvailableModelsWithAntigravity(hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) ([]Route, CatalogSnapshot) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	ids := c.modelIDsLocked()
@@ -468,7 +517,7 @@ func (c *Catalog) AvailableModels(hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonym
 		if !c.supportedLocked(model) {
 			continue
 		}
-		if route, err := c.routeLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonymous); err == nil {
+		if route, err := c.routeLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous); err == nil {
 			routes = append(routes, route)
 		}
 	}
@@ -489,7 +538,7 @@ func (c *Catalog) snapshotLocked(ids []string) CatalogSnapshot {
 		stale = stale || time.Since(c.updatedAt) > max(2*c.refreshAfter, time.Minute)
 	}
 	return CatalogSnapshot{
-		Zen: len(c.zen), Go: len(c.goModels), Codex: len(c.codexModels), Total: len(ids), Exposed: exposed,
+		Zen: len(c.zen), Go: len(c.goModels), Codex: len(c.codexModels), Antigravity: len(c.antigravityModels), Total: len(ids), Exposed: exposed,
 		UpdatedAt: c.updatedAt, CacheSource: c.cacheSource, Stale: stale,
 	}
 }
@@ -542,7 +591,7 @@ func (c *Catalog) ValidateReasoningEffort(model string, tier config.Tier, effort
 }
 
 func (c *Catalog) supportedLocked(model string) bool {
-	if len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 {
+	if len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0 {
 		return true
 	}
 	if c.zen[model] && c.tierSupportedLocked(model, config.TierZen) {
@@ -552,6 +601,9 @@ func (c *Catalog) supportedLocked(model string) bool {
 		return true
 	}
 	if c.codexModels[model] && c.tierSupportedLocked(model, config.TierCodex) {
+		return true
+	}
+	if c.antigravityModels[model] && c.tierSupportedLocked(model, config.TierAntigravity) {
 		return true
 	}
 	return false
@@ -569,12 +621,15 @@ func (c *Catalog) tierSupportedLocked(model string, tier config.Tier) bool {
 		// upstream advertised is supported unless explicitly excluded.
 		return true
 	}
+	if tier == config.TierAntigravity {
+		return true
+	}
 	if c.nativeProtocols[tier][model] != "" {
 		return true
 	}
 	// A pending catalog has no upstream capability snapshot to contradict a
 	// configured key, so retain the pre-refresh compatibility behavior.
-	return len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0
+	return len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
 }
 
 func toSet(items []string) map[string]bool {

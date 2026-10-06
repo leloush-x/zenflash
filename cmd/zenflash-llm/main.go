@@ -14,6 +14,7 @@ import (
 	"time"
 
 	adminui "zenflash-llm/internal/admin"
+	"zenflash-llm/internal/antigravity"
 	"zenflash-llm/internal/buildinfo"
 	"zenflash-llm/internal/cline/app"
 	"zenflash-llm/internal/codex"
@@ -22,12 +23,17 @@ import (
 	"zenflash-llm/internal/telemetry"
 )
 
-// codexLogin runs the ChatGPT device-code flow and saves the resulting
-// refreshable credentials beside the config file.
+// codexLogin runs the ChatGPT PKCE flow and saves credentials beside the config.
 func codexLogin(configPath string, out io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 16*time.Minute)
 	defer cancel()
 	return codex.AuthenticateDevice(ctx, nil, codex.DefaultConfig(), codex.AuthPath(configPath), out)
+}
+
+func antigravityLogin(configPath string, port int, out io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 16*time.Minute)
+	defer cancel()
+	return antigravity.AuthenticateDevice(ctx, nil, antigravity.AuthPath(configPath), port, out)
 }
 
 // version remains the linker injection point used by release builds.
@@ -38,10 +44,26 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "login" {
 		fs := flag.NewFlagSet("login", flag.ExitOnError)
 		configPath := fs.String("config", "config.json", "path to config.json")
+		port := fs.Int("port", 51121, "loopback port for Antigravity OAuth callback")
 		_ = fs.Parse(os.Args[2:])
-		if err := codexLogin(*configPath, os.Stdout); err != nil {
-			slog.Error("codex sign-in failed", "error", err)
-			os.Exit(1)
+		target := "codex"
+		if fs.NArg() > 0 {
+			target = fs.Arg(0)
+		}
+		switch target {
+		case "codex":
+			if err := codexLogin(*configPath, os.Stdout); err != nil {
+				slog.Error("codex sign-in failed", "error", err)
+				os.Exit(1)
+			}
+		case "antigravity":
+			if err := antigravityLogin(*configPath, *port, os.Stdout); err != nil {
+				slog.Error("antigravity sign-in failed", "error", err)
+				os.Exit(1)
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "unknown login target %q (want codex or antigravity)\n", target)
+			os.Exit(2)
 		}
 		return
 	}
