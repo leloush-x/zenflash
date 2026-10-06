@@ -19,14 +19,16 @@
     try {
       data = await api("/api/debug/models");
       catalog = await api("/api/catalog").catch(() => null);
-      const first = (data?.models ?? []).find((m: any) => m.anonymous_eligibility?.allowed);
+      const list = (data?.models ?? []).filter(usable);
+      const first = list.find((m: any) => m.anonymous_eligibility?.allowed) ?? list[0];
       if (!model && first) model = first.model;
     } catch {}
   }
 
   onMount(load);
 
-  const models = $derived((data?.models ?? []).filter((m: any) => m.anonymous_eligibility?.allowed));
+  const usable = (m: any) => m.anonymous_eligibility?.allowed || m.available_codex || m.available_antigravity;
+  const models = $derived((data?.models ?? []).filter(usable));
   const keys = $derived(data?.keys ?? { zen: [], go: [], codex: [], antigravity: [] });
   const catById = $derived(new Map<string, any>((catalog?.data ?? []).map((m: any) => [m.id, m])));
   const selectedCat = $derived(catById.get(model));

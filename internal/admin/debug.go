@@ -71,6 +71,10 @@ func (a *Server) handleDebugModels(w http.ResponseWriter, _ *http.Request) {
 				for i := range models {
 					if models[i].Model == id {
 						models[i].AvailableCodex = true
+						// Service account lists it, so it is routable: drop the
+						// stale file-pool route error and point at the codex tier.
+						models[i].RouteError = ""
+						models[i].Tier = config.TierCodex
 					}
 				}
 			}
@@ -326,7 +330,7 @@ func (a *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 	// Merge Service Codex models (same as WrapAPI does for public /v1/models)
 	// so the catalogue shows logged-in Codex accounts. Skipped for the
 	// default free-tier view since Codex accounts are not free-tier.
-	if recorder.status >= 200 && recorder.status < 300 && a.codex != nil && q.Get("all") == "1" {
+	if recorder.status >= 200 && recorder.status < 300 && a.codex != nil {
 		var listing map[string]any
 		if json.Unmarshal(recorder.body.Bytes(), &listing) == nil {
 			data, _ := listing["data"].([]any)

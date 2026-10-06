@@ -146,12 +146,15 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	now := time.Now().Unix()
 	routes, _ := g.availableModels()
-	// Free-tier view: ?free=1 keeps only anonymous-eligible free models so
-	// clients that only want the free tier see a clean catalogue.
+	// Usable-tier view: ?free=1 keeps anonymous-eligible free models plus
+	// linked-account tiers (Codex service accounts, Antigravity free-tier
+	// quota). Pure paid upstream models stay hidden. OpenCode's anonymous
+	// free lane is currently restricted upstream, so account tiers are what
+	// actually serve.
 	if r != nil && (r.URL.Query().Get("free") == "1" || r.URL.Query().Get("free") == "true") {
 		kept := routes[:0]
 		for _, route := range routes {
-			if g.catalog.IsFreeModel(route.ID) {
+			if g.catalog.IsFreeModel(route.ID) || route.Tier == config.TierCodex || route.Tier == config.TierAntigravity {
 				kept = append(kept, route)
 			}
 		}

@@ -27,10 +27,6 @@ func (s *Service) WrapAPI(base http.Handler, keys func() []string) http.Handler 
 			copyHTTP(w, recorder)
 			return
 		}
-		if r.URL.Query().Get("free") == "1" || r.URL.Query().Get("free") == "true" {
-			copyHTTP(w, recorder)
-			return
-		}
 		data, _ := listing["data"].([]any)
 		indices := map[string]int{}
 		for i, item := range data {

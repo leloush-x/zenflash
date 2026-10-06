@@ -35,15 +35,17 @@
 
   onMount(load);
 
-  let freeOnly = $state(false);
+  let freeOnly = $state(true);
   const all = $derived(data?.models ?? []);
   const freeCount = $derived(all.filter((m: any) => m.anonymous_eligibility?.allowed).length);
   const agCount = $derived(all.filter((m: any) => m.available_antigravity).length);
   const codexCount = $derived(all.filter((m: any) => m.available_codex).length);
+  const usable = (m: any) => m.anonymous_eligibility?.allowed || m.available_codex || m.available_antigravity;
+  const mineCount = $derived(all.filter((m: any) => !m.anonymous_eligibility?.allowed && (m.available_codex || m.available_antigravity)).length);
   const visible = $derived(
     all.filter(
       (m: any) =>
-        (!freeOnly || m.anonymous_eligibility?.allowed) &&
+        (freeOnly ? m.anonymous_eligibility?.allowed : usable(m)) &&
         (!modelFilter.trim() || m.model.toLowerCase().includes(modelFilter.trim().toLowerCase())),
     ),
   );
@@ -52,7 +54,7 @@
 <PageHeading section="MODELS" title="Model catalog" description="Live catalog — refresh live forces upstream re-poll, or use /v1/models?refresh=1." icon="models" />
 
 <div class="fade-up flex flex-wrap items-center gap-2">
-  <div class="eyebrow !mb-0">models · {visible.length} / {all.length} · free {freeCount} · ag {agCount} · codex {codexCount}</div>
+  <div class="eyebrow !mb-0">usable · {visible.length} / {all.length} · free {freeCount} · mine {mineCount}</div>
   <span class="grow"></span>
   <label class="flex items-center gap-1.5 text-[12px] text-[color:var(--color-dim)]">
     <input type="checkbox" bind:checked={freeOnly} /> free only
