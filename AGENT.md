@@ -33,6 +33,7 @@ Default listeners are API `127.0.0.1:8080`, admin `127.0.0.1:8081`, and embedded
 - Keep model routing protocol-aware per upstream tier; the same model ID may differ between Zen and Go.
 - Do not edit `webui/` for backend-only tasks.
 - Model capability fields must come from upstream data. Missing values stay unknown/omitted; never manufacture context sizes, output limits, or effort lists.
+- FREEZE (user 2026-10-06): keep the Cline fix as-is — never alter `internal/cline` register/proxy behavior (`cline/cline/auth.go` RegisterWithCline, `cline/kit/http.go` proxy handling, embedded proxy state). Only env/config (`HTTPS_PROXY`, `proxies`) may change for retries.
 
 ## How to log changes
 
