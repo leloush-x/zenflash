@@ -45,6 +45,37 @@ func (a *Server) handleDebugModels(w http.ResponseWriter, _ *http.Request) {
 	models, metadata := a.manager.DebugModels()
 	catalog := a.manager.Resources().Models
 	keys := a.manager.DebugKeys()
+	// Merge Service (encrypted store) Codex models which bypass the file-based
+	// catalog but are injected into /v1/models via WrapAPI. Without this the
+	// Models page never shows logged-in Codex accounts.
+	if a.codex != nil {
+		for _, m := range a.codex.Models() {
+			id := strings.TrimSpace(m.ID)
+			if id == "" {
+				continue
+			}
+			found := false
+			for _, d := range models {
+				if d.Model == id {
+					found = true
+					break
+				}
+			}
+			if !found {
+				models = append(models, modelcatalog.RouteDiagnostic{
+					Model: id, NativeProtocol: "responses", ProtocolSource: "codex-service",
+					AvailableCodex: true, Tier: config.TierCodex,
+					AnonymousEligibility: modelcatalog.AnonymousDecision{Allowed: false, Source: "codex-account"},
+				})
+			} else {
+				for i := range models {
+					if models[i].Model == id {
+						models[i].AvailableCodex = true
+					}
+				}
+			}
+		}
+	}
 	a.mu.Lock()
 	last := a.lastInference
 	a.mu.Unlock()
@@ -284,6 +315,42 @@ func (a *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 	request.Header.Set("Authorization", "Bearer "+cfg.ServerKeys[0])
 	recorder := newDebugResponseRecorder()
 	a.manager.Handler().ServeHTTP(recorder, request)
+	// Merge Service Codex models (same as WrapAPI does for public /v1/models)
+	// so the catalogue shows logged-in Codex accounts.
+	if recorder.status >= 200 && recorder.status < 300 && a.codex != nil {
+		var listing map[string]any
+		if json.Unmarshal(recorder.body.Bytes(), &listing) == nil {
+			data, _ := listing["data"].([]any)
+			indices := map[string]int{}
+			for i, item := range data {
+				if m, ok := item.(map[string]any); ok {
+					if id, ok := m["id"].(string); ok {
+						indices[id] = i
+					}
+				}
+			}
+			for _, m := range a.codex.Models() {
+				if m.ID == "" {
+					continue
+				}
+				entry := map[string]any{"id": m.ID, "object": "model", "owned_by": m.OwnedBy, "display_name": m.DisplayName, "source": "codex-account", "provider": "codex", "route_protocol": "responses"}
+				if i, exists := indices[m.ID]; exists {
+					data[i] = entry
+				} else {
+					indices[m.ID] = len(data)
+					data = append(data, entry)
+				}
+			}
+			listing["data"] = data
+			if body, err := json.Marshal(listing); err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(recorder.status)
+				_, _ = w.Write(body)
+				return
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(recorder.status)
 	_, _ = w.Write(recorder.body.Bytes())

@@ -42,13 +42,14 @@ func (g *Gateway) AntigravityQuota(ctx context.Context) []AntigravityAccountQuot
 		email   string
 		token   string
 		project string
+		full    antigravity.TokenData
 	}
 	var creds []cred
 	for _, t := range stored {
 		if strings.TrimSpace(t.AccessToken) == "" {
 			continue
 		}
-		creds = append(creds, cred{email: strings.TrimSpace(t.Email), token: strings.TrimSpace(t.AccessToken), project: strings.TrimSpace(t.ProjectID)})
+		creds = append(creds, cred{email: strings.TrimSpace(t.Email), token: strings.TrimSpace(t.AccessToken), project: strings.TrimSpace(t.ProjectID), full: t})
 	}
 	for _, k := range g.cfg.AntigravityKeys {
 		k = strings.TrimSpace(k)
@@ -78,6 +79,29 @@ func (g *Gateway) AntigravityQuota(ctx context.Context) []AntigravityAccountQuot
 			}
 		}
 		quotas, err := antigravity.FetchQuota(qctx, client, c.token, c.project)
+		// Token may have expired between background refreshes; try one
+		// refresh+retry on 401 so quota stays live instead of erroring.
+		if err != nil && strings.Contains(strings.ToLower(err.Error()), "401") && strings.TrimSpace(c.full.RefreshToken) != "" {
+			if refreshed, rerr := antigravity.Refresh(qctx, client, c.full); rerr == nil {
+				refreshed.ProjectID = c.full.ProjectID
+				refreshed.Email = c.full.Email
+				c.token = strings.TrimSpace(refreshed.AccessToken)
+				// Persist for next calls and rebuild pool.
+				if toks, _ := antigravity.LoadTokens(g.antigravityAuthPath); len(toks) > 0 {
+					for i := range toks {
+						if strings.TrimSpace(toks[i].Email) == c.email && c.email != "" || strings.TrimSpace(toks[i].ProjectID) == c.project {
+							toks[i] = *refreshed
+							toks[i].ProjectID = c.project
+							toks[i].Email = c.email
+							break
+						}
+					}
+					_ = antigravity.SaveTokens(g.antigravityAuthPath, toks)
+				}
+				g.rebuildAntigravityPool()
+				quotas, err = antigravity.FetchQuota(qctx, client, c.token, c.project)
+			}
+		}
 		cancel()
 		entry := AntigravityAccountQuota{
 			Email:     c.email,

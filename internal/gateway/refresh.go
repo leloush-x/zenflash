@@ -444,7 +444,7 @@ func (g *Gateway) refreshAntigravityModels(ctx context.Context) []string {
 func (g *Gateway) StartAntigravityTokenRefresh(ctx context.Context) {
 	go func() {
 		g.refreshAntigravityTokens(ctx)
-		ticker := time.NewTicker(time.Hour)
+		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {

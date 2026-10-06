@@ -35,17 +35,28 @@
 
   onMount(load);
 
-  const free = $derived((data?.models ?? []).filter((m: any) => m.anonymous_eligibility?.allowed));
+  let freeOnly = $state(false);
+  const all = $derived(data?.models ?? []);
+  const freeCount = $derived(all.filter((m: any) => m.anonymous_eligibility?.allowed).length);
+  const agCount = $derived(all.filter((m: any) => m.available_antigravity).length);
+  const codexCount = $derived(all.filter((m: any) => m.available_codex).length);
   const visible = $derived(
-    free.filter((m: any) => !modelFilter.trim() || m.model.toLowerCase().includes(modelFilter.trim().toLowerCase())),
+    all.filter(
+      (m: any) =>
+        (!freeOnly || m.anonymous_eligibility?.allowed) &&
+        (!modelFilter.trim() || m.model.toLowerCase().includes(modelFilter.trim().toLowerCase())),
+    ),
   );
 </script>
 
 <PageHeading section="MODELS" title="Model catalog" description="Live catalog — refresh live forces upstream re-poll, or use /v1/models?refresh=1." icon="models" />
 
 <div class="fade-up flex flex-wrap items-center gap-2">
-  <div class="eyebrow !mb-0">free models · {visible.length} / {(data?.models ?? []).length}</div>
+  <div class="eyebrow !mb-0">models · {visible.length} / {all.length} · free {freeCount} · ag {agCount} · codex {codexCount}</div>
   <span class="grow"></span>
+  <label class="flex items-center gap-1.5 text-[12px] text-[color:var(--color-dim)]">
+    <input type="checkbox" bind:checked={freeOnly} /> free only
+  </label>
   <input class="w-full sm:w-56" placeholder="filter models…" bind:value={modelFilter} />
   <button class="btn-ghost" onclick={load}>refresh cached</button>
   <button class="btn-ghost" onclick={refreshLive} disabled={refreshing}>{refreshing ? "updating…" : "refresh live"}</button>

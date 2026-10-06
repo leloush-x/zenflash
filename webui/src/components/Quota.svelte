@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, num } from "../lib";
+  import { api, post, num } from "../lib";
   import PageHeading from "./PageHeading.svelte";
 
   let data = $state<any>(null);
@@ -11,6 +11,7 @@
   let filter = $state("");
   let serverKeys = $state(1);
 
+  let refreshingTokens = $state(false);
   async function load() {
     loading = true;
     failed = "";
@@ -25,6 +26,15 @@
     } finally {
       loading = false;
     }
+  }
+
+  async function refreshTokens() {
+    refreshingTokens = true;
+    try {
+      await post("/api/oauth/refresh");
+    } catch {}
+    refreshingTokens = false;
+    await load();
   }
 
   onMount(load);
@@ -90,6 +100,7 @@
     <input type="checkbox" bind:checked={showInternal} /> show internal
   </label>
   <input class="w-full sm:w-56" placeholder="filter models…" bind:value={filter} />
+  <button class="btn-ghost" onclick={refreshTokens} disabled={refreshingTokens || loading}>{refreshingTokens ? "refreshing tokens…" : "refresh tokens"}</button>
   <button class="btn-ghost" onclick={load} disabled={loading}>{loading ? "loading…" : "refresh live"}</button>
 </div>
 
