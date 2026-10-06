@@ -23,7 +23,27 @@ import (
 	"strings"
 	"time"
 	"zenflash-llm/internal/config"
+	"zenflash-llm/internal/store"
 )
+
+// tokenStore is the optional Postgres home for login tokens. When nil,
+// tokens live only in the JSON file beside the config.
+var tokenStore *store.Store
+
+// SetStore attaches the Postgres token home. Nil restores file-only mode.
+func SetStore(s *store.Store) {
+	tokenStore = s
+}
+
+func antigravityAccountID(t TokenData, i int) string {
+	if t.ProjectID != "" {
+		return t.ProjectID
+	}
+	if t.Email != "" {
+		return t.Email
+	}
+	return fmt.Sprintf("account-%d", i)
+}
 
 const (
 	// DefaultClientID is the public Google OAuth client ID used by the
@@ -176,13 +196,13 @@ func AuthPath(configPath string) string {
 func LoadTokens(path string) ([]TokenData, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
 		}
-		return nil, err
+		return restoreTokens(path), nil
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return nil, nil
+		return restoreTokens(path), nil
 	}
 	var toks []TokenData
 	if err := json.Unmarshal(data, &toks); err != nil {
@@ -191,7 +211,30 @@ func LoadTokens(path string) ([]TokenData, error) {
 	return toks, nil
 }
 
-func SaveTokens(path string, toks []TokenData) error {
+// restoreTokens reloads login tokens from Postgres when the file is gone
+// (fresh host, wiped volume) and rewrites the file so later reads stay fast.
+func restoreTokens(path string) []TokenData {
+	if tokenStore == nil {
+		return nil
+	}
+	raw := tokenStore.OAuthList(context.Background(), "antigravity")
+	if len(raw) == 0 {
+		return nil
+	}
+	var toks []TokenData
+	for _, b := range raw {
+		var one TokenData
+		if json.Unmarshal(b, &one) == nil {
+			toks = append(toks, one)
+		}
+	}
+	if len(toks) > 0 {
+		_ = writeTokensFile(path, toks)
+	}
+	return toks
+}
+
+func writeTokensFile(path string, toks []TokenData) error {
 	data, err := json.MarshalIndent(toks, "", "  ")
 	if err != nil {
 		return err
@@ -202,6 +245,33 @@ func SaveTokens(path string, toks []TokenData) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+func SaveTokens(path string, toks []TokenData) error {
+	if err := writeTokensFile(path, toks); err != nil {
+		return err
+	}
+	mirrorTokens(toks)
+	return nil
+}
+
+// mirrorTokens copies the just-saved login tokens to Postgres. The file
+// write above already succeeded, so DB trouble never fails the request.
+func mirrorTokens(toks []TokenData) {
+	if tokenStore == nil {
+		return
+	}
+	ids := make([]string, 0, len(toks))
+	payloads := make([][]byte, 0, len(toks))
+	for i, tok := range toks {
+		raw, err := json.Marshal(tok)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, antigravityAccountID(tok, i))
+		payloads = append(payloads, raw)
+	}
+	tokenStore.OAuthSave(context.Background(), "antigravity", ids, payloads)
 }
 
 func IsStale(t TokenData) bool {

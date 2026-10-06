@@ -113,6 +113,16 @@ func (p *anonymousPool) MarkSuccess(node *anonymousNode) {
 	node.cooldownUntil.Store(0)
 }
 
+// cooldownJitter spreads retry wake-ups so concurrent requests do not hammer
+// upstream the instant a shared cooldown expires. Timing only: it never
+// changes routing, formats, or error shapes.
+func cooldownJitter(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return delay
+	}
+	return delay + time.Duration(rand.Int64N(int64(delay)/4+1))
+}
+
 func (p *anonymousPool) MarkFailure(node *anonymousNode, resp *http.Response, err error) {
 	if node == nil {
 		return
@@ -127,7 +137,7 @@ func (p *anonymousPool) MarkFailure(node *anonymousNode, resp *http.Response, er
 			delay = retryAfter
 		}
 	}
-	node.cooldownUntil.Store(time.Now().Add(delay).UnixNano())
+	node.cooldownUntil.Store(time.Now().Add(cooldownJitter(delay)).UnixNano())
 }
 
 func (p *transportPool) hasHealthy() bool {
@@ -513,7 +523,7 @@ func (p *nodePool) MarkFailure(node *upstreamNode, resp *http.Response, err erro
 			delay = retryAfter
 		}
 	}
-	node.cooldownUntil.Store(time.Now().Add(delay).UnixNano())
+	node.cooldownUntil.Store(time.Now().Add(cooldownJitter(delay)).UnixNano())
 }
 
 func parseRetryAfter(value string) time.Duration {

@@ -155,6 +155,8 @@ func main() {
 	manager, err := gateway.NewRuntimeManager(ctx, *configPath, cfg, logger, monitor, hub, redactor, level)
 	if err == nil && durable != nil {
 		manager.SetStore(durable)
+		codex.SetStore(durable)
+		antigravity.SetStore(durable)
 	}
 	if err != nil {
 		logger.Error("failed to initialize runtime", "component", "runtime", "event", "runtime_initialization_failed", "error", err)

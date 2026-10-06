@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -113,10 +114,15 @@ func (a *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 func (a *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, _ := r.Cookie(adminCookieName)
 	if cookie != nil {
+		hash := tokenDigest(cookie.Value)
 		a.mu.Lock()
-		delete(a.sessions, tokenDigest(cookie.Value))
+		delete(a.sessions, hash)
+		ds := a.durable
 		a.mu.Unlock()
 		a.persistSessions()
+		if ds != nil {
+			ds.SessionDelete(context.Background(), hash)
+		}
 	}
 	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1, Secure: requestIsSecure(r)})
 	w.WriteHeader(http.StatusNoContent)
@@ -312,7 +318,8 @@ func (a *Server) loadSessions() {
 		return
 	}
 	data, err := os.ReadFile(a.sessionsPath)
-	if err != nil {
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		a.restoreSessions()
 		return
 	}
 	var stored map[string]adminSession
@@ -327,6 +334,49 @@ func (a *Server) loadSessions() {
 		}
 	}
 	a.mu.Unlock()
+}
+
+// restoreSessions reloads dashboard sessions from Postgres when the file is
+// gone (fresh host, wiped volume) and rewrites the file for fast later reads.
+func (a *Server) restoreSessions() {
+	a.mu.Lock()
+	ds := a.durable
+	a.mu.Unlock()
+	if ds == nil {
+		return
+	}
+	rows := ds.SessionList(context.Background())
+	if len(rows) == 0 {
+		return
+	}
+	now := time.Now()
+	restored := make(map[string]adminSession, len(rows))
+	for hash, raw := range rows {
+		var session adminSession
+		if json.Unmarshal([]byte(raw), &session) != nil {
+			continue
+		}
+		if now.Before(session.Expires) {
+			restored[hash] = session
+		}
+	}
+	if len(restored) == 0 {
+		return
+	}
+	a.mu.Lock()
+	for hash, session := range restored {
+		a.sessions[hash] = session
+	}
+	a.mu.Unlock()
+	data, err := json.Marshal(restored)
+	if err != nil {
+		return
+	}
+	tmp := a.sessionsPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, a.sessionsPath)
 }
 
 // persistSessions writes the session map atomically; failures are logged and
@@ -354,5 +404,25 @@ func (a *Server) persistSessions() {
 	}
 	if err := os.Rename(tmp, a.sessionsPath); err != nil {
 		a.logger.Warn("could not persist sessions", "component", "auth", "error", err)
+	}
+	a.mirrorSessions(stored)
+}
+
+// mirrorSessions copies dashboard sessions to Postgres. The file write above
+// already succeeded, so DB trouble never fails the request.
+func (a *Server) mirrorSessions(stored map[string]adminSession) {
+	a.mu.Lock()
+	ds := a.durable
+	a.mu.Unlock()
+	if ds == nil {
+		return
+	}
+	ctx := context.Background()
+	for hash, session := range stored {
+		raw, err := json.Marshal(session)
+		if err != nil {
+			continue
+		}
+		ds.SessionPut(ctx, hash, string(raw), session.Expires)
 	}
 }
