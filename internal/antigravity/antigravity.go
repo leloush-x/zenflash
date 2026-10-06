@@ -631,6 +631,15 @@ func FetchQuota(ctx context.Context, client *http.Client, accessToken, projectID
 	return nil, last
 }
 
+// retiredModels are IDs Google reports as no longer available ("switch to
+// Gemini 3.7 Flash"). They still appear in quota listings, but advertising
+// them for routing only produces the retirement message.
+var retiredModels = map[string]bool{
+	"gemini-3-flash-agent":       true,
+	"gemini-3.5-flash-extra-low": true,
+	"gemini-3.5-flash-low":       true,
+}
+
 // FetchModels lists wire model IDs via fetchAvailableModels.
 func FetchModels(ctx context.Context, client *http.Client, accessToken, projectID string) ([]string, error) {
 	quotas, err := FetchQuota(ctx, client, accessToken, projectID)
@@ -641,6 +650,9 @@ func FetchModels(ctx context.Context, client *http.Client, accessToken, projectI
 	for _, q := range quotas {
 		id := strings.TrimSpace(q.ID)
 		if id == "" {
+			continue
+		}
+		if retiredModels[id] {
 			continue
 		}
 		lower := strings.ToLower(id)
@@ -929,7 +941,6 @@ func BuildGenerateRequest(chatBody []byte, model, project string) ([]byte, strin
 	data, err := json.Marshal(env)
 	return data, wire, err
 }
-
 
 // isUserProjectPermissionError reports whether a generateContent 403 is about
 // the x-goog-user-project billing project rather than the request itself.
