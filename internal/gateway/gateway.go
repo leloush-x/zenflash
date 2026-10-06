@@ -22,6 +22,7 @@ import (
 	"zenflash-llm/internal/jsonutil"
 	"zenflash-llm/internal/models"
 	wire "zenflash-llm/internal/protocol"
+	"zenflash-llm/internal/store"
 	"zenflash-llm/internal/telemetry"
 )
 
@@ -42,6 +43,7 @@ type Gateway struct {
 	codexNodes          atomic.Pointer[nodePool]
 	antigravityAuthPath string
 	antigravityNodes    atomic.Pointer[nodePool]
+	keyStore            *store.Store
 }
 
 // codexPool returns the live codex node pool. The pool is rebuilt in place
@@ -161,6 +163,13 @@ func antigravityCredentialToCodex(creds []antigravity.Credential) []codex.Creden
 	return out
 }
 
+// SetKeyStore attaches the optional Postgres key cache (nil disables it).
+func (g *Gateway) SetKeyStore(s *store.Store) {
+	if g != nil {
+		g.keyStore = s
+	}
+}
+
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", g.authenticate(g.handleModels))
@@ -174,17 +183,27 @@ func (g *Gateway) Handler() http.Handler {
 
 func (g *Gateway) authenticate(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if len(g.cfg.ServerKeys) == 0 {
+		if len(g.cfg.ServerKeys) == 0 && (g.keyStore == nil || !g.keyStore.HasDBKeys()) {
 			next(w, r)
 			return
 		}
-		candidates := []string{strings.TrimSpace(r.Header.Get("x-api-key"))}
-		if auth := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+		candidates := []string{strings.TrimSpace(r.Header.Get(config.HeaderAPIKey))}
+		if auth := r.Header.Get(config.HeaderAuthorization); strings.HasPrefix(strings.ToLower(auth), "bearer ") {
 			candidates = append(candidates, strings.TrimSpace(auth[7:]))
 		}
 		valid := false
-		for _, key := range g.cfg.ServerKeys {
-			for _, candidate := range candidates {
+		for _, candidate := range candidates {
+			if candidate == "" {
+				continue
+			}
+			if g.keyStore != nil {
+				if g.keyStore.ValidKey(candidate, g.cfg.ServerKeys) {
+					valid = true
+					break
+				}
+				continue
+			}
+			for _, key := range g.cfg.ServerKeys {
 				if len(candidate) == len(key) && subtle.ConstantTimeCompare([]byte(candidate), []byte(key)) == 1 {
 					valid = true
 				}
@@ -200,6 +219,16 @@ func (g *Gateway) authenticate(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// resolveRoute accepts bare IDs (prefer-order, today's behavior) and
+// tier-prefixed IDs (opencode/x, cline/x, ...) pinned to one tier.
+func (g *Gateway) resolveRoute(model string) (models.Route, error) {
+	raw, tier, ok := models.SplitTierPrefix(model)
+	if !ok {
+		return g.catalog.RouteWithAntigravity(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+	}
+	return g.catalog.RoutePinned(raw, tier, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 }
 
 func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
@@ -223,11 +252,11 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			wire.WriteError(w, external, http.StatusBadRequest, "model is required", "invalid_request_error", "model")
 			return
 		}
-		if !g.catalog.Supported(model) {
+		if !g.catalog.SupportedNamespaced(model) {
 			wire.WriteError(w, external, http.StatusBadRequest, "the model uses an upstream protocol that zenflash-llm does not expose", "invalid_request_error", "model")
 			return
 		}
-		route, err := g.catalog.RouteWithAntigravity(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+		route, err := g.resolveRoute(model)
 		if override, selected := debugKeyOverrideFrom(r.Context()); selected {
 			// A per-key diagnostic must not silently be served by another key,
 			// another tier or the anonymous lane.
@@ -251,6 +280,10 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 				wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", effortParam)
 				return
 			}
+		}
+		if raw, _, ok := models.SplitTierPrefix(model); ok {
+			model = raw
+			payload["model"] = raw
 		}
 		if meta != nil {
 			meta.Tier = string(route.Tier)
@@ -396,11 +429,11 @@ func (g *Gateway) handleSystemOne(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, "model is required", "invalid_request_error", "model")
 		return
 	}
-	if !g.catalog.Supported(model) {
+	if !g.catalog.SupportedNamespaced(model) {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, "the model uses an upstream protocol that zenflash-llm does not expose", "invalid_request_error", "model")
 		return
 	}
-	route, err := g.catalog.RouteWithAntigravity(model, len(g.cfg.ZenKeys) > 0, len(g.cfg.GoKeys) > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+	route, err := g.resolveRoute(model)
 	if err != nil {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, err.Error(), "invalid_request_error", "model")
 		return
@@ -408,6 +441,11 @@ func (g *Gateway) handleSystemOne(w http.ResponseWriter, r *http.Request) {
 	if route.Protocol != wire.SystemOne {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, fmt.Sprintf("the model does not use the %s protocol", wire.SystemOne), "invalid_request_error", "model")
 		return
+	}
+	if raw, _, ok := models.SplitTierPrefix(model); ok {
+		model = raw
+		payload["model"] = raw
+		body, _ = json.Marshal(payload)
 	}
 	g.forwardSystemOne(w, r, body, payload, model, route)
 }

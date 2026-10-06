@@ -127,6 +127,12 @@ func routeModel(id string) string {
 			return "reject"
 		}
 	}
+	if strings.HasPrefix(id, "cline/") {
+		return "cline"
+	}
+	if strings.HasPrefix(id, "go/") {
+		return "cline"
+	}
 	if strings.HasPrefix(id, "opencode/") {
 		short := strings.TrimPrefix(id, "opencode/")
 		if zm, ok := resolveZenModel(short); ok {

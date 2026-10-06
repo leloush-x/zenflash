@@ -13,6 +13,7 @@ import (
 	"zenflash-llm/internal/config"
 	modelcatalog "zenflash-llm/internal/models"
 	"zenflash-llm/internal/protocol"
+	"zenflash-llm/internal/store"
 	"zenflash-llm/internal/telemetry"
 )
 
@@ -41,6 +42,7 @@ type RuntimeManager struct {
 	updateMu   sync.Mutex
 	effective  effectiveListeners
 	metadata   *modelcatalog.PricingStore
+	keyStore   *store.Store
 }
 
 type effectiveListeners struct {
@@ -106,9 +108,21 @@ func (m *RuntimeManager) build(cfg config.Config) (*gatewayRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
+	gateway.SetKeyStore(m.keyStore)
 	gateway.catalog.SetPricingStore(m.metadata)
 	gateway.catalog.SetCachePath(modelcatalog.CatalogCachePath(m.configPath))
 	return &gatewayRuntime{config: cfg, gateway: gateway, handler: gateway.Handler(), cancel: func() {}}, nil
+}
+
+// SetStore attaches the optional Postgres store (nil disables it).
+func (m *RuntimeManager) SetStore(s *store.Store) {
+	if m == nil {
+		return
+	}
+	m.keyStore = s
+	if rt := m.current.Load(); rt != nil && rt.gateway != nil {
+		rt.gateway.SetKeyStore(s)
+	}
 }
 
 func (m *RuntimeManager) start(runtime *gatewayRuntime) {
@@ -342,6 +356,21 @@ func (m *RuntimeManager) DebugRoute(model string, requested protocol.Protocol) m
 		return modelcatalog.RouteDiagnostic{Model: model, RequestedProtocol: requested, RouteError: "gateway runtime is unavailable"}
 	}
 	gateway := runtime.gateway
+	if raw, tier, ok := modelcatalog.SplitTierPrefix(model); ok {
+		hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0
+		hasAntigravity := gateway.antigravityPool().Len() > 0
+		diag := gateway.catalog.DiagnosticWithAntigravity(raw, requested, hasZen, hasGo, hasCodex, hasAntigravity, gateway.cfg.Anonymous)
+		diag.Model = model
+		if route, err := gateway.catalog.RoutePinned(raw, tier, hasZen, hasGo, hasCodex, hasAntigravity, gateway.cfg.Anonymous); err == nil {
+			diag.Tier, diag.Anonymous = route.Tier, route.Anonymous
+			diag.KeyTiers = append([]config.Tier(nil), route.KeyTiers...)
+			diag.NativeProtocol, diag.NativeProtocols = route.Protocol, route.Protocols
+			diag.RouteError = ""
+		} else {
+			diag.RouteError = err.Error()
+		}
+		return diag
+	}
 	return gateway.catalog.DiagnosticWithAntigravity(model, requested, len(gateway.cfg.ZenKeys) > 0, len(gateway.cfg.GoKeys) > 0, gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous)
 }
 
@@ -467,7 +496,6 @@ func (m *RuntimeManager) DeleteOAuthAccount(provider, id string) error {
 	return runtime.gateway.DeleteOAuthAccount(provider, id)
 }
 
-
 // AntigravityQuota returns live per-account quota meters for the dashboard.
 func (m *RuntimeManager) AntigravityQuota(ctx context.Context) []AntigravityAccountQuota {
 	runtime := m.current.Load()
@@ -476,7 +504,6 @@ func (m *RuntimeManager) AntigravityQuota(ctx context.Context) []AntigravityAcco
 	}
 	return runtime.gateway.AntigravityQuota(ctx)
 }
-
 
 // RefreshModelsNow forces one live catalog pass so /v1/models adapts immediately.
 func (m *RuntimeManager) RefreshModelsNow(ctx context.Context) {

@@ -232,6 +232,80 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 			entry["structured_output"] = true
 		}
 		data = append(data, entry)
+		// Collision aliases: the same raw ID advertised on both opencode
+		// (zen) and cline (go) is listed once per tier as opencode/<id> and
+		// cline/<id> so clients can pin a provider. The bare ID is kept for
+		// backward compatibility and follows prefer-order routing.
+		tiers := g.catalog.TiersForModel(model)
+		hasZen, hasGo := false, false
+		for _, tr := range tiers {
+			if tr == config.TierZen {
+				hasZen = true
+			} else if tr == config.TierGo {
+				hasGo = true
+			}
+		}
+		if hasZen && hasGo {
+			for _, aliasTier := range []config.Tier{config.TierZen, config.TierGo} {
+				amd := g.catalog.MetadataForTier(model, aliasTier)
+				amdMap := map[string]any{}
+				if amd.ContextWindow > 0 {
+					amdMap["context_window"] = amd.ContextWindow
+				}
+				if amd.MaxInput > 0 {
+					amdMap["max_input"] = amd.MaxInput
+				}
+				if amd.MaxOutput > 0 {
+					amdMap["max_output"] = amd.MaxOutput
+				}
+				if amd.Reasoning {
+					amdMap["reasoning"] = true
+				}
+				if amd.ReasoningEfforts != nil {
+					amdMap["reasoning_efforts"] = amd.ReasoningEfforts
+				}
+				if amd.ToolCall {
+					amdMap["tool_call"] = true
+				}
+				if amd.StructuredOutput {
+					amdMap["structured_output"] = true
+				}
+				alias := map[string]any{
+					"id": modelcatalog.AliasID(aliasTier, model), "object": "model", "created": now, "owned_by": "opencode",
+					"metadata": amdMap,
+				}
+				if aliasTier == config.TierZen {
+					alias["provider"] = "opencode"
+				} else {
+					alias["provider"] = "cline"
+				}
+				alias["route_protocol"] = route.ProtocolFor(aliasTier)
+				if amd.ReasoningEfforts != nil {
+					alias["reasoning_efforts"] = amd.ReasoningEfforts
+				}
+				if amd.ContextWindow > 0 {
+					alias["context_window"] = amd.ContextWindow
+					alias["context_length"] = amd.ContextWindow
+				}
+				if amd.MaxInput > 0 {
+					alias["max_input"] = amd.MaxInput
+				}
+				if amd.MaxOutput > 0 {
+					alias["max_output"] = amd.MaxOutput
+				}
+				if amd.Reasoning {
+					alias["reasoning"] = true
+					alias["supports_reasoning"] = true
+				}
+				if amd.ToolCall {
+					alias["tool_call"] = true
+				}
+				if amd.StructuredOutput {
+					alias["structured_output"] = true
+				}
+				data = append(data, alias)
+			}
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
