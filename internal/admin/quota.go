@@ -33,11 +33,11 @@ func (a *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	var codex any
 	if a.codex != nil {
 		codex = map[string]any{
-			"accounts":           a.codex.Accounts(),
-			"models":             a.codex.Models(),
-			"window":             "last 30 days, local ZenFlash requests only",
-			"remaining_note":     "OpenAI does not expose remaining monthly quota via API",
-			"manage_usage_url":   "https://chatgpt.com/#settings/Usage",
+			"accounts":         a.codex.Accounts(),
+			"models":           a.codex.Models(),
+			"window":           "last 30 days, local ZenFlash requests only",
+			"remaining_note":   "OpenAI does not expose remaining monthly quota via API",
+			"manage_usage_url": "https://chatgpt.com/#settings/Usage",
 		}
 	} else {
 		codex = map[string]any{"accounts": []any{}, "models": []any{}}

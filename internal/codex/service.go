@@ -546,7 +546,7 @@ func (s *Service) ProxyResponses(w http.ResponseWriter, r *http.Request, model s
 			wire.WriteError(w, external, http.StatusBadGateway, "failed to read streamed response", "upstream_error", "")
 			return
 		}
-	completed, input, output := completedResponse(streamBody)
+		completed, input, output := completedResponse(streamBody)
 		if len(completed) == 0 {
 			wire.WriteError(w, external, http.StatusBadGateway, "OpenAI stream ended without response.completed", "upstream_error", "")
 			return

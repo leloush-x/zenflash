@@ -574,7 +574,7 @@ func FetchModels(ctx context.Context, client *http.Client, baseURL string, cred 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4 << 10))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return nil, resp.StatusCode, fmt.Errorf("codex models endpoint returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var payload modelsResponse

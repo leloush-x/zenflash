@@ -221,7 +221,7 @@ func (g *Gateway) DeleteOAuthAccount(provider, id string) error {
 			return err
 		}
 		g.rebuildCodexPool()
-	g.triggerCatalogRefresh()
+		g.triggerCatalogRefresh()
 		return nil
 	case "antigravity":
 		existing, _ := antigravity.LoadTokens(g.antigravityAuthPath)
@@ -241,7 +241,7 @@ func (g *Gateway) DeleteOAuthAccount(provider, id string) error {
 			return err
 		}
 		g.rebuildAntigravityPool()
-	g.triggerCatalogRefresh()
+		g.triggerCatalogRefresh()
 		return nil
 	default:
 		return fmt.Errorf("unknown provider %q", provider)

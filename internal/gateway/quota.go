@@ -19,16 +19,16 @@ type AntigravityModelQuota struct {
 
 // AntigravityAccountQuota is the live quota for one stored account.
 type AntigravityAccountQuota struct {
-	Email       string                  `json:"email,omitempty"`
-	ProjectID   string                  `json:"project_id,omitempty"`
-	Models      []AntigravityModelQuota `json:"models"`
-	FetchedAt   string                  `json:"fetched_at"`
-	Error       string                  `json:"error,omitempty"`
-	Total       int                     `json:"total"`
-	FullQuota   int                     `json:"full_quota"`
-	Partial     int                     `json:"partial"`
-	Exhausted   int                     `json:"exhausted"`
-	Unknown     int                     `json:"unknown"`
+	Email     string                  `json:"email,omitempty"`
+	ProjectID string                  `json:"project_id,omitempty"`
+	Models    []AntigravityModelQuota `json:"models"`
+	FetchedAt string                  `json:"fetched_at"`
+	Error     string                  `json:"error,omitempty"`
+	Total     int                     `json:"total"`
+	FullQuota int                     `json:"full_quota"`
+	Partial   int                     `json:"partial"`
+	Exhausted int                     `json:"exhausted"`
+	Unknown   int                     `json:"unknown"`
 }
 
 // AntigravityQuota queries fetchAvailableModels for every stored account plus

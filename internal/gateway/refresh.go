@@ -151,73 +151,73 @@ func (g *Gateway) applyProxyHealthResult(result proxyHealthResult, source string
 }
 
 func (g *Gateway) refreshOnce(ctx context.Context) {
-		var zen, goModels, codexModels, antigravityModels []string
-		var capabilities modelcatalog.Capabilities
-		var capabilitiesErr error
-		var wg sync.WaitGroup
-		wg.Add(5)
-		go func() { defer wg.Done(); zen = g.refreshZen(ctx) }()
-		go func() { defer wg.Done(); goModels = g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes) }()
-		go func() { defer wg.Done(); codexModels = g.refreshCodexModels(ctx) }()
-		go func() { defer wg.Done(); antigravityModels = g.refreshAntigravityModels(ctx) }()
-		go func() {
-			defer wg.Done()
-			capabilityCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			capabilities, capabilitiesErr = g.refreshProtocolCapabilities(capabilityCtx)
-		}()
-		wg.Wait()
-		if ctx.Err() != nil {
-			return
+	var zen, goModels, codexModels, antigravityModels []string
+	var capabilities modelcatalog.Capabilities
+	var capabilitiesErr error
+	var wg sync.WaitGroup
+	wg.Add(5)
+	go func() { defer wg.Done(); zen = g.refreshZen(ctx) }()
+	go func() { defer wg.Done(); goModels = g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes) }()
+	go func() { defer wg.Done(); codexModels = g.refreshCodexModels(ctx) }()
+	go func() { defer wg.Done(); antigravityModels = g.refreshAntigravityModels(ctx) }()
+	go func() {
+		defer wg.Done()
+		capabilityCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		capabilities, capabilitiesErr = g.refreshProtocolCapabilities(capabilityCtx)
+	}()
+	wg.Wait()
+	if ctx.Err() != nil {
+		return
+	}
+	if capabilitiesErr != nil {
+		g.logger.Warn("OpenCode capability catalog refresh failed", "component", "models", "event", "capability_refresh_failed", "error", capabilitiesErr)
+	}
+	if capabilities.Protocols == nil {
+		capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
+	}
+	if goModels != nil {
+		if capabilities.Protocols[config.TierGo] == nil {
+			capabilities.Protocols[config.TierGo] = map[string]wire.Protocol{}
 		}
-		if capabilitiesErr != nil {
-			g.logger.Warn("OpenCode capability catalog refresh failed", "component", "models", "event", "capability_refresh_failed", "error", capabilitiesErr)
+		for _, model := range goModels {
+			if _, ok := capabilities.Protocols[config.TierGo][model]; !ok {
+				capabilities.Protocols[config.TierGo][model] = wire.Chat
+			}
 		}
+	}
+	if antigravityModels != nil {
+		if capabilities.Protocols[config.TierAntigravity] == nil {
+			capabilities.Protocols[config.TierAntigravity] = map[string]wire.Protocol{}
+		}
+		for _, model := range antigravityModels {
+			if _, ok := capabilities.Protocols[config.TierAntigravity][model]; !ok {
+				capabilities.Protocols[config.TierAntigravity][model] = wire.Chat
+			}
+		}
+	}
+	if codexModels != nil {
 		if capabilities.Protocols == nil {
 			capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 		}
-		if goModels != nil {
-			if capabilities.Protocols[config.TierGo] == nil {
-				capabilities.Protocols[config.TierGo] = map[string]wire.Protocol{}
-			}
-			for _, model := range goModels {
-				if _, ok := capabilities.Protocols[config.TierGo][model]; !ok {
-					capabilities.Protocols[config.TierGo][model] = wire.Chat
-				}
+		if capabilities.Protocols[config.TierCodex] == nil {
+			capabilities.Protocols[config.TierCodex] = map[string]wire.Protocol{}
+		}
+		for _, model := range codexModels {
+			if _, ok := capabilities.Protocols[config.TierCodex][model]; !ok {
+				capabilities.Protocols[config.TierCodex][model] = wire.Responses
 			}
 		}
-		if antigravityModels != nil {
-			if capabilities.Protocols[config.TierAntigravity] == nil {
-				capabilities.Protocols[config.TierAntigravity] = map[string]wire.Protocol{}
-			}
-			for _, model := range antigravityModels {
-				if _, ok := capabilities.Protocols[config.TierAntigravity][model]; !ok {
-					capabilities.Protocols[config.TierAntigravity][model] = wire.Chat
-				}
+	}
+	if zen != nil || goModels != nil || codexModels != nil || antigravityModels != nil {
+		g.catalog.ReplaceWithCapabilities(zen, goModels, codexModels, antigravityModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
+		if ctx.Err() == nil {
+			if err := g.catalog.SaveCache(); err != nil {
+				g.logger.Warn("model catalog cache write failed", "component", "models", "event", "catalog_cache_write_failed", "error", err)
 			}
 		}
-		if codexModels != nil {
-			if capabilities.Protocols == nil {
-				capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
-			}
-			if capabilities.Protocols[config.TierCodex] == nil {
-				capabilities.Protocols[config.TierCodex] = map[string]wire.Protocol{}
-			}
-			for _, model := range codexModels {
-				if _, ok := capabilities.Protocols[config.TierCodex][model]; !ok {
-					capabilities.Protocols[config.TierCodex][model] = wire.Responses
-				}
-			}
-		}
-		if zen != nil || goModels != nil || codexModels != nil || antigravityModels != nil {
-			g.catalog.ReplaceWithCapabilities(zen, goModels, codexModels, antigravityModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
-			if ctx.Err() == nil {
-				if err := g.catalog.SaveCache(); err != nil {
-					g.logger.Warn("model catalog cache write failed", "component", "models", "event", "catalog_cache_write_failed", "error", err)
-				}
-			}
-			g.logger.Info("model catalog refreshed", "component", "models", "event", "catalog_refreshed", "models", len(g.catalog.List()))
-		}
+		g.logger.Info("model catalog refreshed", "component", "models", "event", "catalog_refreshed", "models", len(g.catalog.List()))
+	}
 }
 
 // RefreshModelsNow runs one catalog refresh pass synchronously so /v1/models
