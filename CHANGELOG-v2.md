@@ -59,3 +59,9 @@
 - Per-step revert: `git log --oneline v2`, then `git revert <sha>` for the step.
 - Full rollback: `git checkout main` (v2 never merged to main; no force-push).
 - Data rollback: files untouched by importer; DB additive only; stop binary, unset `DATABASE_URL`, restart on `main` with same `config.json`.
+
+## [11] v2: persist Cline account pool in Postgres
+- `STATE_DIR` now selects the embedded Cline account-pool file location. If a legacy pool exists elsewhere, it is copied to `STATE_DIR` without removing the source.
+- The Postgres file mirror now syncs this pool as `file:cline-accounts` and restores it when the state file is absent.
+- The pool follows the existing best-effort startup + one-minute mirror cadence. Set `DATABASE_URL` to enable Postgres; otherwise the file remains the only store.
+- Verification: `go test ./internal/cline/kit ./internal/store ./internal/cline/app` and `go build -buildvcs=false ./cmd/zenflash-llm` passed.

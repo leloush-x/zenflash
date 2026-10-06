@@ -3,6 +3,7 @@ package kit
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ResolveDataPath 数据文件路径解析：优先 data/ 子目录（可执行文件目录，其次工作目录），
@@ -16,6 +17,10 @@ func ResolveDataPath(filename string) string {
 	if wd, err := os.Getwd(); err == nil {
 		pwd = wd
 	}
+	return resolveDataPath(filename, os.Getenv("STATE_DIR"), exeDir, pwd)
+}
+
+func resolveDataPath(filename, stateDir, exeDir, pwd string) string {
 	candidates := []string{}
 	if exeDir != "" {
 		candidates = append(candidates, filepath.Join(exeDir, "data", filename))
@@ -28,6 +33,28 @@ func ResolveDataPath(filename string) string {
 	}
 	if pwd != "" {
 		candidates = append(candidates, filepath.Join(pwd, filename))
+	}
+	if stateDir = strings.TrimSpace(stateDir); stateDir != "" {
+		target := filepath.Join(stateDir, filename)
+		if _, err := os.Stat(target); err == nil {
+			return target
+		}
+		if err := os.MkdirAll(stateDir, 0700); err == nil {
+			for _, legacy := range candidates {
+				if legacy == target {
+					continue
+				}
+				data, err := os.ReadFile(legacy)
+				if err != nil {
+					continue
+				}
+				if err := os.WriteFile(target, data, 0600); err == nil {
+					return target
+				}
+				break
+			}
+		}
+		return target
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"zenflash-llm/internal/cline/kit"
 )
 
 // syncedFiles lists every file-backed state mirrored into Postgres slots.
@@ -22,6 +24,7 @@ func syncedFiles(configPath string) []struct{ path, slot string } {
 		{base(".models.dev.json"), "file:models-dev"},
 		{base(".codex.enc"), "file:codex-enc"},
 		{base(".codex.enc.key"), "file:codex-enc-key"},
+		{kit.ResolveDataPath(".cline-accounts.json"), "file:cline-accounts"},
 		{filepath.Join(dir, "data", ".zen-config.json"), "file:zen-config"},
 	}
 }
