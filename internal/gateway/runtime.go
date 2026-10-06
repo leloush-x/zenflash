@@ -467,6 +467,16 @@ func (m *RuntimeManager) DeleteOAuthAccount(provider, id string) error {
 	return runtime.gateway.DeleteOAuthAccount(provider, id)
 }
 
+
+// AntigravityQuota returns live per-account quota meters for the dashboard.
+func (m *RuntimeManager) AntigravityQuota(ctx context.Context) []AntigravityAccountQuota {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return []AntigravityAccountQuota{}
+	}
+	return runtime.gateway.AntigravityQuota(ctx)
+}
+
 // RefreshOAuthAccounts forces an immediate token refresh.
 func (m *RuntimeManager) RefreshOAuthAccounts(ctx context.Context) {
 	runtime := m.current.Load()

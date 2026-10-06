@@ -570,8 +570,28 @@ func DefaultModels() []string {
 	}
 }
 
-// FetchModels lists wire model IDs via fetchAvailableModels.
-func FetchModels(ctx context.Context, client *http.Client, accessToken, projectID string) ([]string, error) {
+// ModelQuota is one fetchAvailableModels entry with its quota meter.
+// RemainingFraction is 0-1 when upstream reports it, nil when it does not.
+type ModelQuota struct {
+	ID                string   `json:"id"`
+	DisplayName       string   `json:"display_name,omitempty"`
+	RemainingFraction *float64 `json:"remaining_fraction,omitempty"`
+	IsInternal        bool     `json:"is_internal,omitempty"`
+}
+
+func remainingFraction(qi *struct {
+	RemainingFraction *float64 `json:"remainingFraction"`
+}) *float64 {
+	if qi == nil {
+		return nil
+	}
+	return qi.RemainingFraction
+}
+
+// FetchQuota lists all fetchAvailableModels entries with quota meters.
+// Unlike FetchModels it keeps internal entries and display names so the
+// dashboard can render a real quota meter per model.
+func FetchQuota(ctx context.Context, client *http.Client, accessToken, projectID string) ([]ModelQuota, error) {
 	payload := map[string]any{}
 	if strings.TrimSpace(projectID) != "" {
 		payload["project"] = strings.TrimSpace(projectID)
@@ -583,27 +603,56 @@ func FetchModels(ctx context.Context, client *http.Client, accessToken, projectI
 			last = err
 			continue
 		}
-		ids := make([]string, 0, len(r.Models))
-		for id := range r.Models {
+		if len(r.Models) == 0 {
+			continue
+		}
+		out := make([]ModelQuota, 0, len(r.Models))
+		for id, info := range r.Models {
 			id = strings.TrimSpace(id)
 			if id == "" {
 				continue
 			}
-			lower := strings.ToLower(id)
-			if strings.HasPrefix(lower, "gemini") || strings.HasPrefix(lower, "claude") || strings.HasPrefix(lower, "gpt") {
-				ids = append(ids, id)
-			}
+			out = append(out, ModelQuota{
+				ID:                id,
+				DisplayName:       strings.TrimSpace(info.DisplayName),
+				RemainingFraction: remainingFraction(info.QuotaInfo),
+				IsInternal:        info.IsInternal,
+			})
 		}
-		if len(ids) == 0 {
+		if len(out) == 0 {
 			continue
 		}
-		sort.Strings(ids)
-		return ids, nil
+		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+		return out, nil
 	}
 	if last == nil {
 		last = errors.New("no quota endpoint succeeded")
 	}
 	return nil, last
+}
+
+// FetchModels lists wire model IDs via fetchAvailableModels.
+func FetchModels(ctx context.Context, client *http.Client, accessToken, projectID string) ([]string, error) {
+	quotas, err := FetchQuota(ctx, client, accessToken, projectID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(quotas))
+	for _, q := range quotas {
+		id := strings.TrimSpace(q.ID)
+		if id == "" {
+			continue
+		}
+		lower := strings.ToLower(id)
+		if strings.HasPrefix(lower, "gemini") || strings.HasPrefix(lower, "claude") || strings.HasPrefix(lower, "gpt") {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, errors.New("no quota endpoint succeeded")
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // Sync refreshes the bearer if needed, then resolves profile, project and models.

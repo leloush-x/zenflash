@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -31,7 +32,8 @@ const (
 	RedirectURI       = "http://localhost:1455/auth/callback"
 	AuthorizeScopes   = "openid profile email offline_access"
 	RefreshScopes     = "openid profile email"
-	UserAgent         = "codex-cli/0.91.0"
+	UserAgent         = "codex-cli/0.155.0"
+	ClientVersion     = "0.155.0"
 	RefreshHours      = 8
 )
 
@@ -530,10 +532,20 @@ func waitForOAuthCallback(ctx context.Context, redirectURI, wantState string) (c
 }
 
 // modelsResponse mirrors the Codex backend /models payload.
+// The backend switched from {"data":[{"id"}]} to
+// {"models":[{"slug","visibility","priority"}]} and now requires
+// ?client_version=. Both shapes are accepted; only visibility:list entries
+// are kept, in catalog priority order.
 type modelsResponse struct {
 	Data []struct {
 		ID string `json:"id"`
 	} `json:"data"`
+	Models []struct {
+		Slug       string `json:"slug"`
+		ID         string `json:"id"`
+		Visibility string `json:"visibility"`
+		Priority   int    `json:"priority"`
+	} `json:"models"`
 }
 
 // FetchModels lists models from the Codex backend ({base}/models).
@@ -542,6 +554,11 @@ func FetchModels(ctx context.Context, client *http.Client, baseURL string, cred 
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	endpoint := strings.TrimRight(baseURL, "/") + "/models"
+	if strings.Contains(endpoint, "?") {
+		endpoint += "&client_version=" + url.QueryEscape(ClientVersion)
+	} else {
+		endpoint += "?client_version=" + url.QueryEscape(ClientVersion)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, 0, err
@@ -557,20 +574,57 @@ func FetchModels(ctx context.Context, client *http.Client, baseURL string, cred 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return nil, resp.StatusCode, fmt.Errorf("codex models endpoint returned HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4 << 10))
+		return nil, resp.StatusCode, fmt.Errorf("codex models endpoint returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var payload modelsResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&payload); err != nil {
 		return nil, resp.StatusCode, err
 	}
-	models := make([]string, 0, len(payload.Data))
-	for _, item := range payload.Data {
-		if strings.TrimSpace(item.ID) != "" {
-			models = append(models, strings.TrimSpace(item.ID))
+	type ranked struct {
+		id       string
+		priority int
+		order    int
+	}
+	var kept []ranked
+	for i, item := range payload.Data {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			kept = append(kept, ranked{id: id, order: i})
 		}
 	}
-	if len(models) == 0 {
+	for i, m := range payload.Models {
+		id := strings.TrimSpace(m.Slug)
+		if id == "" {
+			id = strings.TrimSpace(m.ID)
+		}
+		if id == "" {
+			continue
+		}
+		// Only visibility:list models are selectable; hide stays hidden.
+		if strings.TrimSpace(m.Visibility) != "" && !strings.EqualFold(strings.TrimSpace(m.Visibility), "list") {
+			continue
+		}
+		kept = append(kept, ranked{id: id, priority: m.Priority, order: i})
+	}
+	if len(kept) == 0 {
 		return nil, resp.StatusCode, errors.New("codex models endpoint returned an empty list")
+	}
+	sort.Slice(kept, func(i, j int) bool {
+		if kept[i].priority != kept[j].priority {
+			return kept[i].priority < kept[j].priority
+		}
+		if kept[i].order != kept[j].order {
+			return kept[i].order < kept[j].order
+		}
+		return kept[i].id < kept[j].id
+	})
+	models := make([]string, 0, len(kept))
+	seen := map[string]bool{}
+	for _, r := range kept {
+		if !seen[r.id] {
+			seen[r.id] = true
+			models = append(models, r.id)
+		}
 	}
 	return models, resp.StatusCode, nil
 }

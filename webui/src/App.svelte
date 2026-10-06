@@ -8,6 +8,7 @@
   import Proxies from "./components/Proxies.svelte";
   import Playground from "./components/Playground.svelte";
   import Logs from "./components/Logs.svelte";
+  import Quota from "./components/Quota.svelte";
   import Config from "./components/Config.svelte";
   import Login from "./components/Login.svelte";
   import QuickConnect from "./components/QuickConnect.svelte";
@@ -15,6 +16,7 @@
   const TABS: [string, string][] = [
     ["overview", "Overview"],
     ["models", "Models"],
+    ["quota", "Quota"],
     ["keys", "Keys"],
     ["proxies", "Proxies"],
     ["playground", "Playground"],
@@ -131,6 +133,7 @@
             <Overview {live} />
           {/if}
           {#if tab === "models"}<Models />{/if}
+          {#if tab === "quota"}<Quota />{/if}
           {#if tab === "keys"}<Keys {live} />{/if}
           {#if tab === "proxies"}<Proxies />{/if}
           {#if tab === "playground"}<Playground />{/if}

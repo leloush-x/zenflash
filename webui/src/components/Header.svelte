@@ -6,7 +6,7 @@
     connected: boolean; live: any; t: any; tab: string; tabs: [string, string][];
     onTab: (id: string) => void; onLogout: () => void; theme: string; onTheme: () => void;
   } = $props();
-  const icons: Record<string, string> = { overview: "overview", models: "models", keys: "keys", proxies: "proxies", playground: "playground", logs: "logs", config: "settings" };
+  const icons: Record<string, string> = { overview: "overview", models: "models", quota: "quota", keys: "keys", proxies: "proxies", playground: "playground", logs: "logs", config: "settings" };
   const themeName = $derived(theme === "violet" ? "Violet" : theme === "amber" ? "Amber" : "Mint");
 </script>
 
