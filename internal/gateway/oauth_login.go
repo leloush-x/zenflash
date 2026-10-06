@@ -183,6 +183,7 @@ func (g *Gateway) finishBrowserLogin(ctx context.Context, sess *browserLoginSess
 			return OAuthAccount{}, err
 		}
 		g.rebuildCodexPool()
+	g.triggerCatalogRefresh()
 		id := strings.TrimSpace(td.Email)
 		if id == "" {
 			id = strings.TrimSpace(td.AccountID)
@@ -217,6 +218,7 @@ func (g *Gateway) finishBrowserLogin(ctx context.Context, sess *browserLoginSess
 			return OAuthAccount{}, err
 		}
 		g.rebuildAntigravityPool()
+	g.triggerCatalogRefresh()
 		id := strings.TrimSpace(td.Email)
 		if id == "" {
 			id = strings.TrimSpace(td.ProjectID)
@@ -242,3 +244,4 @@ func splitCallback(input string) (code, state string) {
 	}
 	return u.Query().Get("code"), u.Query().Get("state")
 }
+

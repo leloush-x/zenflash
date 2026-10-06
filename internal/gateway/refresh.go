@@ -150,8 +150,7 @@ func (g *Gateway) applyProxyHealthResult(result proxyHealthResult, source string
 	g.logger.Debug("proxy health check is still failing", "component", "proxy", "event", "health_check_still_failing", "source", source, "upstream_status", upstreamStatus, "proxy", config.RedactURL(result.proxy.name), "error", result.err)
 }
 
-func (g *Gateway) StartModelRefresh(ctx context.Context) {
-	refresh := func() {
+func (g *Gateway) refreshOnce(ctx context.Context) {
 		var zen, goModels, codexModels, antigravityModels []string
 		var capabilities modelcatalog.Capabilities
 		var capabilitiesErr error
@@ -219,17 +218,32 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 			}
 			g.logger.Info("model catalog refreshed", "component", "models", "event", "catalog_refreshed", "models", len(g.catalog.List()))
 		}
+}
+
+// RefreshModelsNow runs one catalog refresh pass synchronously so /v1/models
+// adapts immediately after account changes or ?refresh=1 requests.
+func (g *Gateway) RefreshModelsNow(ctx context.Context) {
+	if g == nil {
+		return
+	}
+	g.refreshOnce(ctx)
+}
+
+func (g *Gateway) StartModelRefresh(ctx context.Context) {
+	g.refreshOnce(ctx)
+	interval := time.Duration(g.cfg.Models.RefreshSeconds) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Minute
 	}
 	go func() {
-		refresh()
-		ticker := time.NewTicker(time.Duration(g.cfg.Models.RefreshSeconds) * time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				refresh()
+				g.refreshOnce(ctx)
 			}
 		}
 	}()

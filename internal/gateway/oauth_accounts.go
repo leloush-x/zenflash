@@ -127,6 +127,7 @@ func (g *Gateway) ImportCodexRefreshToken(ctx context.Context, refreshToken stri
 		return OAuthAccount{}, err
 	}
 	g.rebuildCodexPool()
+	g.triggerCatalogRefresh()
 	id := strings.TrimSpace(refreshed.Email)
 	if id == "" {
 		id = strings.TrimSpace(refreshed.AccountID)
@@ -173,6 +174,7 @@ func (g *Gateway) ImportAntigravityRefreshToken(ctx context.Context, refreshToke
 		return OAuthAccount{}, err
 	}
 	g.rebuildAntigravityPool()
+	g.triggerCatalogRefresh()
 	id := strings.TrimSpace(synced.Email)
 	if id == "" {
 		id = strings.TrimSpace(synced.ProjectID)
@@ -219,6 +221,7 @@ func (g *Gateway) DeleteOAuthAccount(provider, id string) error {
 			return err
 		}
 		g.rebuildCodexPool()
+	g.triggerCatalogRefresh()
 		return nil
 	case "antigravity":
 		existing, _ := antigravity.LoadTokens(g.antigravityAuthPath)
@@ -238,6 +241,7 @@ func (g *Gateway) DeleteOAuthAccount(provider, id string) error {
 			return err
 		}
 		g.rebuildAntigravityPool()
+	g.triggerCatalogRefresh()
 		return nil
 	default:
 		return fmt.Errorf("unknown provider %q", provider)
@@ -248,4 +252,17 @@ func (g *Gateway) DeleteOAuthAccount(provider, id string) error {
 func (g *Gateway) RefreshOAuthAccounts(ctx context.Context) {
 	g.refreshCodexTokens(ctx)
 	g.refreshAntigravityTokens(ctx)
+}
+
+// triggerCatalogRefresh refreshes /v1/models in background so newly linked
+// or removed accounts adapt immediately instead of waiting for the tick.
+func (g *Gateway) triggerCatalogRefresh() {
+	if g == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		g.RefreshModelsNow(ctx)
+	}()
 }

@@ -37,7 +37,7 @@ func (s *Service) WrapAPI(base http.Handler, keys func() []string) http.Handler 
 			}
 		}
 		for _, model := range s.Models() {
-			entry := map[string]any{"id": model.ID, "object": "model", "created": time.Now().Unix(), "owned_by": model.OwnedBy, "display_name": model.DisplayName, "source": "codex-account"}
+			entry := map[string]any{"id": model.ID, "object": "model", "created": time.Now().Unix(), "owned_by": model.OwnedBy, "display_name": model.DisplayName, "source": "codex-account", "provider": "codex", "route_protocol": "responses"}
 			if i, exists := indices[model.ID]; exists {
 				data[i] = entry
 			} else {

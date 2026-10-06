@@ -69,6 +69,7 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("POST /api/cline/accounts/add", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountAdd))))
 	mux.Handle("GET /api/catalog", a.authenticate(http.HandlerFunc(a.handleCatalog)))
 	mux.Handle("GET /api/oauth/accounts", a.authenticate(http.HandlerFunc(a.handleOAuthAccounts)))
+	mux.Handle("POST /api/catalog/refresh", a.authenticate(a.csrf(http.HandlerFunc(a.handleCatalogRefresh))))
 	mux.Handle("GET /api/quota", a.authenticate(http.HandlerFunc(a.handleQuota)))
 	mux.Handle("GET /api/oauth/antigravity/quota", a.authenticate(http.HandlerFunc(a.handleAntigravityQuota)))
 	mux.Handle("POST /api/oauth/codex/import", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthImport("codex")))))

@@ -7,13 +7,19 @@
   let failed = $state("");
   let loading = $state(true);
   let showInternal = $state(false);
+  let lowOnly = $state(false);
   let filter = $state("");
+  let serverKeys = $state(1);
 
   async function load() {
     loading = true;
     failed = "";
     try {
       data = await api<any>("/api/quota");
+      try {
+        const c = await api<any>("/api/config");
+        serverKeys = (c?.server_keys ?? []).length || 1;
+      } catch {}
     } catch (e) {
       failed = String(e);
     } finally {
@@ -39,18 +45,52 @@
   const codexModels = $derived<any[]>(data?.codex?.models ?? []);
   const clineAccounts = $derived<any[]>(data?.cline?.accounts ?? []);
   const clineAvailable = $derived<boolean>(data?.cline?.available !== false);
+
+  const agModelsAll = $derived<any[]>(antigravity.flatMap((a: any) => a.models ?? []));
+  const agLow = $derived(agModelsAll.filter((m: any) => m.remaining_fraction != null && m.remaining_fraction < 0.5 && !m.is_internal).length);
+  const agEmpty = $derived(agModelsAll.filter((m: any) => m.remaining_fraction != null && m.remaining_fraction <= 0.001 && !m.is_internal).length);
+  const providersActive = $derived(
+    (antigravity.length > 0 ? 1 : 0) + (codexAccounts.length > 0 ? 1 : 0) + (clineAccounts.length > 0 ? 1 : 0),
+  );
+
+  function sortedModels(acc: any): any[] {
+    let list = (acc.models ?? []).filter(
+      (m: any) =>
+        (showInternal || !m.is_internal) &&
+        (!lowOnly || m.remaining_fraction == null || m.remaining_fraction < 0.5) &&
+        (!filter.trim() || m.id.toLowerCase().includes(filter.trim().toLowerCase())),
+    );
+    return list.sort((a: any, b: any) => (a.remaining_fraction ?? 2) - (b.remaining_fraction ?? 2) || a.id.localeCompare(b.id));
+  }
+  function avgRemaining(acc: any): number | null {
+    const vals = (acc.models ?? []).filter((m: any) => !m.is_internal && m.remaining_fraction != null).map((m: any) => m.remaining_fraction);
+    if (!vals.length) return null;
+    return vals.reduce((s: number, v: number) => s + v, 0) / vals.length;
+  }
 </script>
 
-<PageHeading section="QUOTA" title="Quota meters" description="Live remaining quota for Antigravity, plus local usage for Codex and Cline." icon="quota" />
+<PageHeading section="QUOTA" title="Quota meters" description="One API key, all providers. Antigravity is live quota, Codex and Cline are local usage." icon="quota" />
 
-<div class="fade-up flex flex-wrap items-center gap-2">
-  <div class="eyebrow !mb-0">quota · {antigravity.length} antigravity · {codexAccounts.length} codex · {clineAccounts.length} cline</div>
+<div class="resource-strip fade-up">
+  <div class="resource-stat highlight"><span>API KEY</span><strong>{serverKeys}</strong><small>single key · Config</small></div>
+  <div class="resource-stat"><span>PROVIDERS</span><strong>{providersActive}<i> / 3</i></strong><small>ag · codex · cline</small></div>
+  <div class="resource-stat"><span>AG MODELS</span><strong>{agModelsAll.filter((m: any) => !m.is_internal).length}</strong><small>quota meters</small></div>
+  <div class="resource-stat"><span>LOW QUOTA</span><strong class:warn={agLow > 0}>{agLow}</strong><small>&lt; 50% remaining</small></div>
+  <div class="resource-stat"><span>EMPTY</span><strong class:bad={agEmpty > 0}>{agEmpty}</strong><small>0% remaining</small></div>
+  <div class="resource-stat"><span>CODEX MODELS</span><strong>{codexModels.length}</strong><small>{codexAccounts.length} account</small></div>
+  <div class="resource-stat"><span>CLINE ACCOUNTS</span><strong>{clineAccounts.length}</strong><small>{clineAvailable ? "proxy up" : "proxy down"}</small></div>
+</div>
+
+<div class="fade-up mt-2 flex flex-wrap items-center gap-2">
   <span class="grow"></span>
+  <label class="flex items-center gap-1.5 text-[12px] text-[color:var(--color-dim)]">
+    <input type="checkbox" bind:checked={lowOnly} /> low only
+  </label>
   <label class="flex items-center gap-1.5 text-[12px] text-[color:var(--color-dim)]">
     <input type="checkbox" bind:checked={showInternal} /> show internal
   </label>
   <input class="w-full sm:w-56" placeholder="filter models…" bind:value={filter} />
-  <button class="btn-ghost" onclick={load} disabled={loading}>{loading ? "loading…" : "refresh"}</button>
+  <button class="btn-ghost" onclick={load} disabled={loading}>{loading ? "loading…" : "refresh live"}</button>
 </div>
 
 {#if failed}
@@ -60,39 +100,43 @@
     {#each Array(3) as _, i (i)}<div class="skel h-36"></div>{/each}
   </div>
 {:else}
-  <!-- Antigravity -->
   <h2 class="mt-4 text-[15px] font-semibold">Antigravity — live Google quota</h2>
-  <p class="dim text-[12px]">From <span class="mono">fetchAvailableModels.quotaInfo.remainingFraction</span> per account. 100% = full.</p>
+  <p class="dim text-[12px]">Sorted lowest first. From <span class="mono">fetchAvailableModels.quotaInfo.remainingFraction</span>. 100% = full.</p>
   {#if !antigravity.length}
     <div class="empty mt-2">no Antigravity accounts linked — run <span class="mono">zenflash-llm login antigravity</span></div>
   {:else}
     <div class="mt-2 grid grid-cols-1 gap-3">
       {#each antigravity as acc (acc.project_id + acc.email)}
+        {@const avg = avgRemaining(acc)}
         <div class="card p-4">
           <div class="flex flex-wrap items-center gap-2">
             <strong class="text-[13px]">{acc.email || acc.project_id || "Antigravity account"}</strong>
             {#if acc.project_id}<span class="pill">{acc.project_id}</span>{/if}
+            {#if avg != null}<span class="pill" class:good={avg >= 0.5} class:warn={avg < 0.5 && avg >= 0.2} class:bad={avg < 0.2}>avg {pct(avg)}</span>{/if}
             <span class="grow"></span>
             <span class="dim mono text-[11px]">{acc.total ?? (acc.models?.length ?? 0)} models · {acc.full_quota ?? 0} full · {acc.partial ?? 0} partial · {acc.exhausted ?? 0} empty</span>
           </div>
+          {#if avg != null}
+            <div class="quota-bar"><div class="quota-fill {tone(avg)}" style="width:{Math.round(avg * 100)}%"></div></div>
+          {/if}
           {#if acc.error}
             <p class="mt-2 text-[12px] bad">quota fetch failed: {acc.error}</p>
           {:else}
-            {@const models = (acc.models ?? []).filter((m: any) => (showInternal || !m.is_internal) && (!filter.trim() || m.id.toLowerCase().includes(filter.trim().toLowerCase())))}
+            {@const models = sortedModels(acc)}
             <div class="mt-3 grid gap-2">
               {#each models as m (m.id)}
                 <div class="flex items-center gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex items-baseline justify-between gap-2">
                       <span class="mono truncate text-[12px]" title={m.display_name ? `${m.id} — ${m.display_name}` : m.id}>{m.id}</span>
-                      <span class="tnum shrink-0 text-[11px]">{pct(m.remaining_fraction)}</span>
+                      <span class="tnum shrink-0 text-[11px]" class:good={m.remaining_fraction >= 0.5} class:warn={m.remaining_fraction < 0.5}>{pct(m.remaining_fraction)}</span>
                     </div>
                     <div class="quota-bar"><div class="quota-fill {tone(m.remaining_fraction)}" style="width:{m.remaining_fraction == null ? 0 : Math.round(m.remaining_fraction * 100)}%"></div></div>
                     {#if m.display_name}<div class="dim truncate text-[11px]">{m.display_name}{m.is_internal ? " · internal" : ""}</div>{/if}
                   </div>
                 </div>
               {/each}
-              {#if !models.length}<div class="dim text-[12px]">no models match filter</div>{/if}
+              {#if !models.length}<div class="dim text-[12px]">no models match — try clearing low-only / filter</div>{/if}
             </div>
           {/if}
         </div>
@@ -100,9 +144,8 @@
     </div>
   {/if}
 
-  <!-- Codex -->
   <h2 class="mt-6 text-[15px] font-semibold">Codex — local usage</h2>
-  <p class="dim text-[12px]">OpenAI exposes no remaining monthly quota via API, so this is ZenFlash-observed usage in the last 30 days. <a class="inline-link" href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noreferrer">Manage usage</a></p>
+  <p class="dim text-[12px]">OpenAI exposes no remaining quota, so this is ZenFlash-observed usage in 30 days. <a class="inline-link" href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noreferrer">Manage usage</a></p>
   {#if !codexAccounts.length}
     <div class="empty mt-2">no Codex accounts linked</div>
   {:else}
@@ -125,7 +168,7 @@
     </div>
     {#if codexModels.length}
       <div class="card mt-3 p-4">
-        <div class="eyebrow">codex models · {codexModels.length}</div>
+        <div class="eyebrow">codex models · {codexModels.length} · via single API key</div>
         <div class="mt-2 flex flex-wrap gap-1.5">
           {#each codexModels as m (m.id)}<code class="mono rounded-md border border-[color:var(--color-edge)] px-2 py-1 text-[11px]">{m.id}</code>{/each}
         </div>
@@ -133,9 +176,8 @@
     {/if}
   {/if}
 
-  <!-- Cline -->
   <h2 class="mt-6 text-[15px] font-semibold">Cline — local usage</h2>
-  <p class="dim text-[12px]">Counters from the embedded Cline proxy (local successful calls and tokens, not upstream quota).</p>
+  <p class="dim text-[12px]">Counters from the embedded proxy (local calls and tokens, not upstream quota).</p>
   {#if !clineAvailable}
     <div class="empty mt-2">{data?.cline?.reason ?? "cline proxy unavailable"}</div>
   {:else if !clineAccounts.length}

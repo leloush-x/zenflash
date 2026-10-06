@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api } from "../lib";
+  import { api, post } from "../lib";
   import PageHeading from "./PageHeading.svelte";
 
   let data = $state<any>(null);
@@ -8,6 +8,7 @@
   let modelFilter = $state("");
   let failed = $state(false);
 
+  let refreshing = $state(false);
   async function load() {
     failed = false;
     try {
@@ -16,6 +17,18 @@
     } catch {
       failed = true;
     }
+  }
+
+  async function refreshLive() {
+    refreshing = true;
+    try {
+      await post("/api/catalog/refresh");
+    } catch {
+      // fall through to cached reload
+    } finally {
+      refreshing = false;
+    }
+    await load();
   }
 
   const catById = $derived(new Map<string, any>((catalog?.data ?? []).map((m: any) => [m.id, m])));
@@ -28,13 +41,14 @@
   );
 </script>
 
-<PageHeading section="MODELS" title="Model catalog" description="Explore available models, protocol support, and published capabilities." icon="models" />
+<PageHeading section="MODELS" title="Model catalog" description="Live catalog — refresh live forces upstream re-poll, or use /v1/models?refresh=1." icon="models" />
 
 <div class="fade-up flex flex-wrap items-center gap-2">
   <div class="eyebrow !mb-0">free models · {visible.length} / {(data?.models ?? []).length}</div>
   <span class="grow"></span>
   <input class="w-full sm:w-56" placeholder="filter models…" bind:value={modelFilter} />
-  <button class="btn-ghost" onclick={load}>refresh</button>
+  <button class="btn-ghost" onclick={load}>refresh cached</button>
+  <button class="btn-ghost" onclick={refreshLive} disabled={refreshing}>{refreshing ? "updating…" : "refresh live"}</button>
 </div>
 
 {#if data?.metadata?.last_error}

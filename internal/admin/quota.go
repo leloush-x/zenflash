@@ -85,3 +85,13 @@ func (a *Server) fetchClineQuota(ctx context.Context) any {
 	}
 	return map[string]any{"available": true, "accounts": parsed.Data.Accounts, "total": parsed.Data.Total}
 }
+
+// handleCatalogRefresh forces one live model catalog pass so /v1/models and
+// the dashboard adapt immediately without waiting for the background tick.
+func (a *Server) handleCatalogRefresh(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	a.manager.RefreshModelsNow(ctx)
+	res := a.manager.Resources()
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"refreshed": true, "models": res.Models, "fetched_at": res.Models.UpdatedAt.UTC().Format(time.RFC3339)})
+}

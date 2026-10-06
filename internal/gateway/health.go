@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -122,7 +123,27 @@ func (g *Gateway) availableModels() ([]modelcatalog.Route, modelcatalog.CatalogS
 	return g.catalog.AvailableModelsWithAntigravity(g.zenNodes.Len() > 0, g.goNodes.Len() > 0, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 }
 
-func (g *Gateway) handleModels(w http.ResponseWriter, _ *http.Request) {
+func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
+	// Dynamic adapt: ?refresh=1 / ?fresh=1 / Cache-Control: no-cache forces one
+	// live catalog pass before serving, so newly linked accounts and upstream
+	// model changes appear immediately instead of waiting for the next tick.
+	if r != nil {
+		q := r.URL.Query()
+		want := q.Get("refresh") == "1" || q.Get("fresh") == "1" || q.Get("live") == "1"
+		if !want && r.Header.Get("Cache-Control") == "no-cache" {
+			want = true
+		}
+		if want {
+			ctx := r.Context()
+			if _, ok := ctx.Deadline(); !ok {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 45*time.Second)
+				defer cancel()
+			}
+			g.RefreshModelsNow(ctx)
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	now := time.Now().Unix()
 	routes, _ := g.availableModels()
 	data := make([]map[string]any, 0, len(routes))

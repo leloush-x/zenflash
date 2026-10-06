@@ -477,6 +477,16 @@ func (m *RuntimeManager) AntigravityQuota(ctx context.Context) []AntigravityAcco
 	return runtime.gateway.AntigravityQuota(ctx)
 }
 
+
+// RefreshModelsNow forces one live catalog pass so /v1/models adapts immediately.
+func (m *RuntimeManager) RefreshModelsNow(ctx context.Context) {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return
+	}
+	runtime.gateway.RefreshModelsNow(ctx)
+}
+
 // RefreshOAuthAccounts forces an immediate token refresh.
 func (m *RuntimeManager) RefreshOAuthAccounts(ctx context.Context) {
 	runtime := m.current.Load()
