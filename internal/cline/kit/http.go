@@ -15,6 +15,10 @@ import (
 var ExecCommand = exec.Command
 
 var HTTPTransport = &http.Transport{
+	// Honor HTTPS_PROXY/HTTP_PROXY so edge-blocked egress IPs (HTML 403 from
+	// the Google front end in front of api.cline.bot) can be routed around
+	// without code changes. Unset when no proxy env is present.
+	Proxy:               http.ProxyFromEnvironment,
 	MaxIdleConns:        100,
 	MaxIdleConnsPerHost: 10,
 	IdleConnTimeout:     90 * time.Second,

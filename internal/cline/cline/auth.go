@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -208,6 +209,9 @@ func RegisterWithCline(workosAccess, workosRefresh string) (*clineAuthResp, erro
 
 	if resp.StatusCode != 200 {
 		b := kit.ReadBody(resp)
+		if resp.StatusCode == http.StatusForbidden && strings.Contains(strings.ToLower(b), "<html") {
+			return nil, fmt.Errorf("cline register failed: edge 403 (egress IP likely blocked by the upstream front end); set HTTPS_PROXY to a residential proxy and retry: %d %s", resp.StatusCode, kit.Truncate(b, 200))
+		}
 		return nil, fmt.Errorf("cline register failed: %d %s", resp.StatusCode, kit.Truncate(b, 200))
 	}
 
