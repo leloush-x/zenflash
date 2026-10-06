@@ -13,6 +13,11 @@ services:
       # ZENFLASHLLM_LISTEN / ZENFLASHLLM_WEBUI_LISTEN to override them.
       LISTEN_ADDRESS: ${ZENFLASHLLM_LISTEN:-}
       WEBUI_LISTEN_ADDRESS: ${ZENFLASHLLM_WEBUI_LISTEN:-}
+      # Empty DATABASE_URL keeps file-backed state. Set it in a local .env
+      # file (uncommitted) or shell export to mirror state into Postgres.
+      DATABASE_URL: ${DATABASE_URL:-}
+      WEBUI_USERNAME: ${WEBUI_USERNAME:-}
+      WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
     # Only the gateway port is published. The embedded Cline proxy (3457) and the
     # dedicated admin listener (8081, if configured to differ) stay internal.
     ports:
