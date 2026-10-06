@@ -171,16 +171,6 @@ func StartProxy(host string, port int) error {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		if activeCount == 0 && len(loadPool().Accounts) == 0 {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{
-				"error": map[string]string{
-					"message": "No accounts in pool. Run with --add-account or POST /admin/login to add accounts.",
-					"type":    "auth_error",
-				},
-			})
-			return
-		}
-
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -210,13 +200,25 @@ func StartProxy(host string, port int) error {
 		// Override system prompt from override.md for OpenAI format
 		applyOverride(params)
 
-		// zen 免费模型路由
-		if route := routeModel(model); route == "zen" {
+		// Resolve the model before requiring a Cline account: OpenCode free
+		// models are served through the anonymous Zen lane and need no account
+		// in the Cline pool.
+		route := routeModel(model)
+		if route == "zen" {
 			handleZenChat(w, r, params)
 			return
 		} else if route == "reject" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"error": map[string]string{"message": fmt.Sprintf("model %q is a paid zen model; only free zen models are proxied", model), "type": "invalid_request_error"},
+			})
+			return
+		}
+		if clinePoolUnavailable(route, len(loadPool().Accounts)) {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"error": map[string]string{
+					"message": "No accounts in pool. Run with --add-account or POST /admin/login to add accounts.",
+					"type":    "auth_error",
+				},
 			})
 			return
 		}
@@ -308,6 +310,10 @@ func StartProxy(host string, port int) error {
 	fmt.Println(strings.Repeat("=", 58))
 
 	return server.ListenAndServe()
+}
+
+func clinePoolUnavailable(route string, accountCount int) bool {
+	return route == "cline" && accountCount == 0
 }
 
 // initLogFile 将日志同时输出到控制台与 cline-proxy.log（追加模式），
