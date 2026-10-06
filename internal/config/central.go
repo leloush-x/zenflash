@@ -118,11 +118,23 @@ type EnvConfig struct {
 	StateDir                  string
 }
 
+// cleanEnvValue trims whitespace and one layer of surrounding single or
+// double quotes, which terminals and dashboards often add when pasting URLs.
+func cleanEnvValue(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) >= 2 {
+		if (v[0] == '\'' && v[len(v)-1] == '\'') || (v[0] == '"' && v[len(v)-1] == '"') {
+			return strings.TrimSpace(v[1 : len(v)-1])
+		}
+	}
+	return v
+}
+
 // LoadEnv reads the environment once.
 func LoadEnv() EnvConfig {
 	get := func(k string) string { return strings.TrimSpace(os.Getenv(k)) }
 	return EnvConfig{
-		DatabaseURL:               strings.TrimSpace(os.Getenv(EnvDatabaseURL)),
+		DatabaseURL:               cleanEnvValue(os.Getenv(EnvDatabaseURL)),
 		WebUIUsername:             get(EnvWebUIUsername),
 		WebUIPassword:             get(EnvWebUIPassword),
 		AntigravityOAuthClients:   strings.TrimSpace(os.Getenv(EnvAntigravityOAuthClients)),
@@ -151,7 +163,7 @@ func (e EnvConfig) Validate() error {
 	if e.DatabaseURL != "" {
 		u, err := url.Parse(e.DatabaseURL)
 		if err != nil || u.Host == "" {
-			return fmt.Errorf("DATABASE_URL must be a valid URL with a host")
+			return fmt.Errorf("DATABASE_URL must be a valid URL with a host (paste the raw value: no surrounding quotes, no trailing spaces)")
 		}
 		if u.Scheme != "postgres" && u.Scheme != "postgresql" {
 			return fmt.Errorf("DATABASE_URL must use postgres:// or postgresql:// scheme")

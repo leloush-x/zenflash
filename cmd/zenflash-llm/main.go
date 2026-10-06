@@ -116,7 +116,6 @@ func main() {
 	env := config.LoadEnvOnce()
 	if err := env.Validate(); err != nil {
 		logger.Error("invalid environment", "error", err)
-		slog.Error("invalid environment", "error", err)
 		os.Exit(1)
 	}
 	var durable *store.Store
