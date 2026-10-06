@@ -18,6 +18,7 @@ import (
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/gateway"
 	"zenflash-llm/internal/httpx"
+	"zenflash-llm/internal/store"
 	"zenflash-llm/internal/telemetry"
 )
 
@@ -32,6 +33,7 @@ type Server struct {
 	debugAttempts map[string]loginWindow
 	lastInference *DebugInferenceResult
 	sessionsPath  string
+	durable       *store.Store
 	clineURL      string
 	codex         *codex.Service
 }
@@ -68,6 +70,7 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("POST /api/cline/accounts/test", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountTest))))
 	mux.Handle("POST /api/cline/accounts/add", a.authenticate(a.csrf(http.HandlerFunc(a.handleClineAccountAdd))))
 	mux.Handle("GET /api/catalog", a.authenticate(http.HandlerFunc(a.handleCatalog)))
+	mux.Handle("GET /api/storage", a.authenticate(http.HandlerFunc(a.handleStorage)))
 	mux.Handle("GET /api/oauth/accounts", a.authenticate(http.HandlerFunc(a.handleOAuthAccounts)))
 	mux.Handle("POST /api/catalog/refresh", a.authenticate(a.csrf(http.HandlerFunc(a.handleCatalogRefresh))))
 	mux.Handle("GET /api/quota", a.authenticate(http.HandlerFunc(a.handleQuota)))

@@ -50,6 +50,11 @@
 - `HTTP_PROXY/HTTPS_PROXY` via `http.ProxyFromEnvironment` (implicit env) kept; moving through config would change transport behavior.
 - Web UI needed no changes (API shapes unchanged); every page not click-tested, only `vite build` via existing dist (no rebuild in this env).
 
+## WebUI sync
+- New additive `GET /api/storage` (auth required): `{enabled, mode, reachable, keys_cached, slots, last_sync}`. No secrets. Existing admin routes unchanged.
+- Settings gains a Storage tab (mode, keys cached, slots, last sync + provider-pin note); Models shows the catalog `provider` pill so `opencode/`/`cline/` pins are visible. No redesign.
+- `webui/dist` rebuild is pending in this environment (vite transform exceeds the execution window; `svelte/compiler` validates both changed components cleanly). Rebuild with `cd webui && npm ci && npm run build` and commit `webui/dist`.
+
 ## Rollback
 - Per-step revert: `git log --oneline v2`, then `git revert <sha>` for the step.
 - Full rollback: `git checkout main` (v2 never merged to main; no force-push).

@@ -33,6 +33,7 @@ func (s *Store) SyncFiles(ctx context.Context, configPath string) {
 	if s == nil || s.pool == nil || strings.TrimSpace(configPath) == "" {
 		return
 	}
+	n := 0
 	for _, f := range syncedFiles(configPath) {
 		data, ferr := os.ReadFile(f.path)
 		remote := s.CatalogLoad(ctx, f.slot)
@@ -49,7 +50,12 @@ func (s *Store) SyncFiles(ctx context.Context, configPath string) {
 				s.CatalogSave(ctx, f.slot, encodeSlot(f.path, data))
 			}
 		}
+		n++
 	}
+	s.mu.Lock()
+	s.lastSync = time.Now().UTC()
+	s.slotCount = n
+	s.mu.Unlock()
 }
 
 // StartFileSync runs SyncFiles at startup and every minute. Nil-safe.

@@ -164,6 +164,7 @@ func main() {
 	var apiHandler http.Handler = manager.Handler()
 	if cfg.WebUI.Enabled {
 		admin := adminui.New(manager, monitor, hub, logger, *configPath+".sessions.json", clineURL, codexService)
+		admin.SetStore(durable)
 		root := http.NewServeMux()
 		root.Handle("/v1/", manager.Handler())
 		root.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

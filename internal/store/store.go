@@ -30,9 +30,11 @@ type Store struct {
 	pool   *pgxpool.Pool
 	logger *slog.Logger
 
-	mu       sync.RWMutex
-	keyHash  map[string]struct{}
-	keyOrder []string
+	mu        sync.RWMutex
+	keyHash   map[string]struct{}
+	keyOrder  []string
+	lastSync  time.Time
+	slotCount int
 
 	statsCh chan statEvent
 	quit    chan struct{}
@@ -303,6 +305,32 @@ func (s *Store) ValidKey(candidate string, fileKeys []string) bool {
 		}
 	}
 	return false
+}
+
+// Status reports durable-store health for the dashboard. Never exposes secrets.
+type Status struct {
+	Enabled   bool      `json:"enabled"`
+	Keys      int       `json:"keys_cached"`
+	LastSync  time.Time `json:"last_sync,omitempty"`
+	Slots     int       `json:"slots"`
+	Reachable bool      `json:"reachable"`
+}
+
+// Status snapshots store health without touching request paths.
+func (s *Store) Status(ctx context.Context) Status {
+	if s == nil || s.pool == nil {
+		return Status{Enabled: false}
+	}
+	s.mu.RLock()
+	keys, last, slots := len(s.keyHash), s.lastSync, s.slotCount
+	s.mu.RUnlock()
+	reachable := true
+	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := s.pool.Ping(cctx); err != nil {
+		reachable = false
+	}
+	return Status{Enabled: true, Keys: keys, LastSync: last, Slots: slots, Reachable: reachable}
 }
 
 // HasDBKeys reports whether the DB holds any key (for status).

@@ -85,6 +85,7 @@
             <div class="truncate font-mono text-[13px]" title={m.model}>{m.model}</div>
             <div class="mt-2 flex flex-wrap gap-1">
               <span class="pill">{m.native_protocol ?? "?"}</span>
+              {#if c?.provider}<span class="pill" title="serving provider">{c.provider}</span>{/if}
               <span class="pill" class:good={m.available_zen}>zen</span>
               <span class="pill" class:good={m.available_go}>go</span>
               <span class="pill" class:good={m.available_codex}>codex</span>

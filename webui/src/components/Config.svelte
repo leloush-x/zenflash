@@ -26,6 +26,10 @@
   let apiKeyOnce = $state("");
   let manualApiKey = $state("");
   let activeSection = $state("access");
+  let storage = $state<any>(null);
+  async function loadStorage() {
+    try { storage = await api("/api/storage"); } catch { storage = null; }
+  }
   let accountsLoading = $state(true);
   let accountBusy = $state(false);
 
@@ -74,7 +78,7 @@
     } catch (e) { flash(String(e)); }
   }
 
-  onMount(() => { load(); loadAccounts(); loadCodex(); loadOAuthAccounts(); });
+  onMount(() => { load(); loadAccounts(); loadCodex(); loadOAuthAccounts(); loadStorage(); });
   let clineTimer: any;
   async function startCline() {
     clineBusy = true;
@@ -365,11 +369,12 @@
       <button class:current={activeSection === "access"} onclick={() => activeSection = "access"}><span>01</span> API access</button>
       <button class:current={activeSection === "accounts"} onclick={() => activeSection = "accounts"}><span>02</span> Provider accounts <b>{accounts.length + codexAccounts.length + antigravityAccounts.length}</b></button>
       <button class:current={activeSection === "runtime"} onclick={() => activeSection = "runtime"}><span>03</span> Gateway</button>
+      <button class:current={activeSection === "storage"} onclick={() => { activeSection = "storage"; loadStorage(); }}><span>04</span> Storage</button>
     </nav>
 
     {#if activeSection === "access"}
       <section class="settings-section">
-        <div class="section-intro"><div><div class="eyebrow">API ACCESS</div><h2>One key. Every API.</h2><p>Use this key for OpenAI compatible and Anthropic endpoints.</p></div><span class="section-index">01 / 03</span></div>
+        <div class="section-intro"><div><div class="eyebrow">API ACCESS</div><h2>One key. Every API.</h2><p>Use this key for OpenAI compatible and Anthropic endpoints.</p></div><span class="section-index">01 / 04</span></div>
         <div class="access-grid">
           <article class="settings-card key-card">
             <div class="card-heading"><div><div class="eyebrow">CLIENT CREDENTIAL</div><h3>API key</h3></div><span class="state-pill" class:ready={config.server_keys?.length}>{config.server_keys?.length ? "Active" : "Not configured"}</span></div>
@@ -383,7 +388,7 @@
       </section>
     {:else if activeSection === "accounts"}
       <section class="settings-section">
-        <div class="section-intro"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Provider accounts</h2><p>Connect, review, and remove Cline, Codex, or Antigravity accounts. CLI login also works.</p></div><span class="section-index">02 / 03</span></div>
+        <div class="section-intro"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Provider accounts</h2><p>Connect, review, and remove Cline, Codex, or Antigravity accounts. CLI login also works.</p></div><span class="section-index">02 / 04</span></div>
         <article class="settings-card codex-card">
           <div class="cline-connect">
             <div class="codex-symbol" aria-hidden="true">⌘</div>
@@ -476,9 +481,9 @@
         </div>
         <details class="manual-import"><summary>Connect Antigravity with a refresh token</summary><div class="manual-import-body"><p>The token is refreshed and synced (profile, project, models) before it is stored.</p><div class="manual-key-row"><input class="token-field" type="password" autocomplete="off" placeholder="Paste Google refresh token" bind:value={antigravityToken} /><button class="btn-ghost" onclick={() => importOAuthToken("antigravity")} disabled={!antigravityToken.trim() || !!oauthBusy}>{oauthBusy === "antigravity" ? "Checking…" : "Validate and add"}</button></div><p>Or on the gateway host: <code>zenflash-llm login antigravity</code></p></div></details>
       </section>
-    {:else}
+    {:else if activeSection === "runtime"}
       <section class="settings-section">
-        <div class="section-intro"><div><div class="eyebrow">GATEWAY CONTROL</div><h2>Runtime settings</h2><p>Adjust routing, model behavior, performance, and dashboard security.</p></div><span class="section-index">03 / 03</span></div>
+        <div class="section-intro"><div><div class="eyebrow">GATEWAY CONTROL</div><h2>Runtime settings</h2><p>Adjust routing, model behavior, performance, and dashboard security.</p></div><span class="section-index">03 / 04</span></div>
         <div class="runtime-grid">
           <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">NETWORK</div><h3>Gateway &amp; routing</h3></div></div><div class="field-grid">
             <label>Preference<select bind:value={config.prefer}><option value="go">go</option><option value="zen">zen</option><option value="codex">codex</option><option value="antigravity">antigravity</option></select></label><label>Zen endpoint<input class="font-mono" bind:value={config.upstream.zen} /></label><label>Go endpoint<input class="font-mono" bind:value={config.upstream.go} /></label><label class="wide-field">Codex endpoint<input class="font-mono" bind:value={config.upstream.codex} /></label><label class="wide-field">Antigravity endpoint<input class="font-mono" placeholder="empty uses daily Cloud Code" bind:value={config.upstream.antigravity} /></label><label>Proxy file<input class="font-mono" bind:value={config.proxyfile} /></label><label>Upstream access<span class="toggle-field"><input type="checkbox" bind:checked={config.anonymous} /><span>Permit anonymous upstream access</span></span></label>
@@ -488,6 +493,24 @@
           <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">MODEL BEHAVIOR</div><h3>Reasoning</h3></div></div><div class="field-grid"><label>Forced effort<input placeholder="Disabled" bind:value={config.reasoning.effort} /></label><label class="wide-field">Effort by model (JSON)<textarea rows="4" class="font-mono" bind:value={effortByModel}></textarea></label></div></article>
           <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">OPERATIONS</div><h3>Logs &amp; dashboard</h3></div></div><div class="field-grid"><label>Log level<select bind:value={config.logging.level}>{#each ["debug", "info", "warn", "error"] as l (l)}<option value={l}>{l}</option>{/each}</select></label><label>Log ring size<input type="number" min="100" max="50000" bind:value={config.logging.ring_size} /></label><label>Session lifetime (minutes)<input type="number" min="5" max="10080" bind:value={config.webui.session_ttl_minutes} /></label><label>Dashboard enabled<span class="toggle-field"><input type="checkbox" bind:checked={config.webui.enabled} /><span>{config.effective?.webui_enabled ? "Enabled" : "Disabled"}</span></span></label><label>Request body logging<span class="toggle-field"><input type="checkbox" bind:checked={config.logging.dump_request_bodies} /><span>Include bodies in diagnostic logs</span></span></label></div></article>
           <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">ADMIN ACCESS</div><h3>Dashboard account</h3></div></div><div class="field-grid account-fields"><label>Current password<input type="password" autocomplete="current-password" bind:value={curPw} /></label><label>New username<input autocomplete="username" placeholder="Leave blank to keep current" bind:value={newUser} /></label><label>New password<input type="password" autocomplete="new-password" placeholder="Leave blank to keep current" bind:value={newPw} /></label><div class="wide-field account-save"><button class="btn-ghost" onclick={saveAccount}>Update dashboard account</button>{#if acctNote}<span>{acctNote}</span>{/if}</div></div></article>
+        </div>
+      </section>
+    {:else if activeSection === "storage"}
+      <section class="settings-section">
+        <div class="section-intro"><div><div class="eyebrow">DURABILITY</div><h2>Storage</h2><p>Where gateway state lives. Postgres mirrors file state when DATABASE_URL is set; files always work.</p></div><span class="section-index">04 / 04</span></div>
+        <div class="runtime-grid">
+          <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">BACKEND STATE</div><h3>{storage?.mode === "postgres" ? "Postgres" : "Files"}</h3></div><span class="state-pill" class:ready={storage && (storage.mode !== "postgres" || storage.reachable)}>{!storage ? "Loading…" : storage.mode === "postgres" ? (storage.reachable ? "Reachable" : "Unreachable") : "Active"}</span></div>
+            {#if storage?.mode === "postgres"}
+              <div class="field-grid"><label>API keys cached<input value={String(storage.keys_cached ?? 0)} disabled /></label><label>Synced slots<input value={String(storage.slots ?? 0)} disabled /></label><label class="wide-field">Last file sync<input value={storage.last_sync ? new Date(storage.last_sync).toLocaleString() : "pending"} disabled /></label></div>
+              <p class="key-hint">Keys serve from memory and refresh on a TTL. Requests never wait on the database; stats write asynchronously.</p>
+            {:else}
+              <p class="key-hint">{storage?.note ?? "Set DATABASE_URL on the gateway to mirror state into Neon Postgres."}</p>
+            {/if}
+            <div class="key-actions"><button class="btn-ghost" onclick={loadStorage}>Refresh status</button></div>
+          </article>
+          <article class="settings-card"><div class="card-heading"><div><div class="eyebrow">PROVIDER PINS</div><h3>opencode/ and cline/</h3></div></div>
+            <p class="key-hint">When both providers serve the same model, /v1/models lists the bare ID plus pinned aliases. Either form works on chat, responses, messages, and systemone (Jev).</p>
+          </article>
         </div>
       </section>
     {/if}
