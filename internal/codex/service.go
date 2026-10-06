@@ -1,26 +1,23 @@
-// Package codex provides an experimental Sign in with ChatGPT Responses
-// provider. OAuth credentials and the per-account model cache are encrypted
-// on disk; models are taken from each authorized account's own /v1/models.
+// Package codex provides a ChatGPT-backend Responses provider. OAuth
+// credentials and the per-account model cache are encrypted on disk; models
+// are taken from each authorized account's own backend /models listing. Login
+// uses the Codex CLI PKCE flow (static public client), shared with codex.go
+// and matching codex2api.
 package codex
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,16 +29,6 @@ import (
 	"time"
 
 	wire "zenflash-llm/internal/protocol"
-)
-
-const (
-	authorizeURL = "https://auth.openai.com/api/accounts/authorize"
-	tokenURL     = "https://auth.openai.com/api/accounts/oauth/token"
-	modelsURL    = "https://api.openai.com/v1/models"
-	responsesURL = "https://api.openai.com/v1/responses"
-	resource     = "https://api.openai.com/v1"
-	redirectURI  = "http://127.0.0.1:1455/auth/callback"
-	scopes       = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 )
 
 type Model struct {
@@ -72,9 +59,8 @@ type diskState struct {
 	HostID   string    `json:"host_id"`
 }
 type login struct {
-	State, Nonce, Verifier string
-	ClientID               string
-	Created                time.Time
+	State, Verifier string
+	Created         time.Time
 }
 type AccountView struct {
 	ID              string    `json:"id"`
@@ -203,41 +189,16 @@ func (s *Service) saveLocked() error {
 	return os.Rename(name, s.path)
 }
 
-func random(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-func challenge(v string) string {
-	sum := sha256.Sum256([]byte(v))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
-
-// StartLogin returns an OpenAI authorization link and a state-bound session ID.
-func (s *Service) StartLogin(issuedClientID string) (map[string]string, error) {
-	clientID := "dynamic_agent_client"
-	if issuedClientID != "" {
-		if !strings.HasPrefix(issuedClientID, "oaiapp_") || len(issuedClientID) <= len("oaiapp_") {
-			return nil, errors.New("invalid issued Codex client ID")
-		}
-		for _, r := range issuedClientID[len("oaiapp_"):] {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
-				return nil, errors.New("invalid issued Codex client ID")
-			}
-		}
-		clientID = issuedClientID
-	}
-	state, err := random(32)
+// StartLogin returns a Codex CLI PKCE authorization link and a state-bound
+// session ID. The issuedClientID argument is accepted for API compatibility
+// but ignored: this flow uses the static public CLI client, exactly like
+// codex2api and the Codex CLI, so no per-registration client ID exists.
+func (s *Service) StartLogin(_ string) (map[string]string, error) {
+	state, err := randomHex(32)
 	if err != nil {
 		return nil, err
 	}
-	nonce, err := random(32)
-	if err != nil {
-		return nil, err
-	}
-	verifier, err := random(64)
+	verifier, err := randomHex(64)
 	if err != nil {
 		return nil, err
 	}
@@ -247,23 +208,9 @@ func (s *Service) StartLogin(issuedClientID string) (map[string]string, error) {
 			delete(s.pending, key)
 		}
 	}
-	s.pending[state] = login{State: state, Nonce: nonce, Verifier: verifier, ClientID: clientID, Created: time.Now()}
+	s.pending[state] = login{State: state, Verifier: verifier, Created: time.Now()}
 	s.mu.Unlock()
-	q := url.Values{}
-	q.Set("response_type", "code")
-	q.Set("client_id", clientID)
-	q.Set("redirect_uri", redirectURI)
-	q.Set("scope", scopes)
-	q.Set("resource", resource)
-	q.Set("state", state)
-	q.Set("nonce", nonce)
-	q.Set("code_challenge", challenge(verifier))
-	q.Set("code_challenge_method", "S256")
-	q.Set("ext_agent_host_id", s.state.HostID)
-	if clientID == "dynamic_agent_client" {
-		q.Set("agent_name_hint", "ZenFlash")
-	}
-	return map[string]string{"auth_url": authorizeURL + "?" + q.Encode(), "state": state, "redirect_uri": redirectURI}, nil
+	return map[string]string{"auth_url": BuildAuthorizeURL(RedirectURI, state, verifier, DefaultConfig()), "state": state, "redirect_uri": RedirectURI}, nil
 }
 
 // CompleteLogin accepts the full localhost callback URL because this service
@@ -272,10 +219,10 @@ func (s *Service) CompleteLogin(ctx context.Context, raw string) (AccountView, e
 	u, err := url.ParseRequestURI(strings.TrimSpace(raw))
 	validCallbackHost := err == nil && u.Scheme == "http" && u.Port() == "1455" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost")
 	if err != nil || !validCallbackHost || u.Path != "/auth/callback" || u.User != nil || u.Fragment != "" {
-		return AccountView{}, errors.New("paste the full http://127.0.0.1:1455/auth/callback URL")
+		return AccountView{}, errors.New("paste the full http://localhost:1455/auth/callback URL")
 	}
 	q := u.Query()
-	state, code, callbackClientID := q.Get("state"), q.Get("code"), q.Get("client_id")
+	state, code := q.Get("state"), q.Get("code")
 	if state == "" || code == "" {
 		return AccountView{}, errors.New("callback must include code and state")
 	}
@@ -286,51 +233,26 @@ func (s *Service) CompleteLogin(ctx context.Context, raw string) (AccountView, e
 	if !ok || time.Since(attempt.Created) > 30*time.Minute {
 		return AccountView{}, errors.New("login session is missing or expired")
 	}
-	clientID := attempt.ClientID
-	if clientID == "dynamic_agent_client" {
-		clientID = callbackClientID
-		if !strings.HasPrefix(clientID, "oaiapp_") || len(clientID) <= len("oaiapp_") {
-			return AccountView{}, errors.New("new registration callback must include its issued client_id")
-		}
-	} else if callbackClientID != "" && callbackClientID != clientID {
-		return AccountView{}, errors.New("callback client_id does not match the issued client for this retry")
-	}
-	form := url.Values{}
-	form.Set("grant_type", "authorization_code")
-	form.Set("client_id", clientID)
-	form.Set("code", code)
-	form.Set("redirect_uri", redirectURI)
-	form.Set("code_verifier", attempt.Verifier)
-	form.Set("resource", resource)
-	var tok struct {
-		Access  string `json:"access_token"`
-		Refresh string `json:"refresh_token"`
-		ID      string `json:"id_token"`
-		Scope   string `json:"scope"`
-		Expires int64  `json:"expires_in"`
-	}
-	if err := s.postForm(ctx, tokenURL, form, &tok); err != nil {
+	exchanged, err := ExchangeCode(ctx, s.client, DefaultConfig(), code, attempt.Verifier, RedirectURI)
+	if err != nil {
 		return AccountView{}, fmt.Errorf("OAuth exchange: %w", err)
 	}
-	if tok.Access == "" || tok.Refresh == "" || tok.ID == "" {
-		return AccountView{}, errors.New("OAuth response did not include required tokens")
+	if strings.TrimSpace(exchanged.RefreshToken) == "" {
+		return AccountView{}, errors.New("OAuth response did not include a refresh token; confirm offline_access was granted")
 	}
-	claims, err := s.validateIDToken(ctx, tok.ID, clientID, attempt.Nonce)
-	if err != nil {
-		return AccountView{}, err
+	id := strings.TrimSpace(exchanged.AccountID)
+	if id == "" {
+		id = strings.TrimSpace(exchanged.Email)
 	}
-	if !hasScope(tok.Scope, "chatgpt.tokens.use.direct") || !hasScope(tok.Scope, "resource.invoke") {
-		return AccountView{}, errors.New("ChatGPT plan usage was not granted; authorize both Responses API scopes")
+	if id == "" {
+		return AccountView{}, errors.New("OAuth response did not identify the ChatGPT account")
 	}
-	acc := account{ID: claims.Subject, Email: claims.Email, ClientID: clientID, AccessToken: tok.Access, RefreshToken: tok.Refresh, IDToken: tok.ID, ExpiresAt: time.Now().Add(time.Duration(tok.Expires) * time.Second)}
-	if acc.ID == "" {
-		return AccountView{}, errors.New("validated identity token did not contain a subject")
-	}
+	acc := account{ID: id, Email: strings.TrimSpace(exchanged.Email), ClientID: DefaultClientID, AccessToken: exchanged.AccessToken, RefreshToken: exchanged.RefreshToken, IDToken: exchanged.IDToken, ExpiresAt: exchanged.ExpiresAt}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	updated := false
 	for i := range s.state.Accounts {
-		if s.state.Accounts[i].ID == acc.ID && s.state.Accounts[i].ClientID == clientID {
+		if s.state.Accounts[i].ID == acc.ID {
 			acc.Models = s.state.Accounts[i].Models
 			acc.ModelsAt = s.state.Accounts[i].ModelsAt
 			acc.Requests30d = s.state.Accounts[i].Requests30d
@@ -352,160 +274,6 @@ func (s *Service) CompleteLogin(ctx context.Context, raw string) (AccountView, e
 		_ = s.RefreshModels(pollCtx)
 	}()
 	return view(acc), nil
-}
-
-func hasScope(raw, want string) bool {
-	for _, v := range strings.Fields(raw) {
-		if v == want {
-			return true
-		}
-	}
-	return false
-}
-func (s *Service) postForm(ctx context.Context, endpoint string, form url.Values, dst any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode/100 != 2 {
-		var oauthErr struct {
-			Error       string `json:"error"`
-			Description string `json:"error_description"`
-		}
-		if json.Unmarshal(b, &oauthErr) == nil {
-			if oauthErr.Description != "" {
-				return fmt.Errorf("token endpoint returned HTTP %d: %s", resp.StatusCode, oauthErr.Description)
-			}
-			if oauthErr.Error != "" {
-				return fmt.Errorf("token endpoint returned HTTP %d: %s", resp.StatusCode, oauthErr.Error)
-			}
-		}
-		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
-			return fmt.Errorf("token endpoint returned HTTP %d with an HTML error page", resp.StatusCode)
-		}
-		body := strings.TrimSpace(string(b))
-		if len(body) > 300 {
-			body = body[:300]
-		}
-		if body == "" {
-			return fmt.Errorf("token endpoint returned HTTP %d", resp.StatusCode)
-		}
-		return fmt.Errorf("token endpoint returned HTTP %d: %s", resp.StatusCode, body)
-	}
-	return json.Unmarshal(b, dst)
-}
-
-type tokenClaims struct {
-	Issuer   string `json:"iss"`
-	Audience any    `json:"aud"`
-	Subject  string `json:"sub"`
-	Nonce    string `json:"nonce"`
-	Email    string `json:"email"`
-	Exp      int64  `json:"exp"`
-}
-
-func (s *Service) validateIDToken(ctx context.Context, token, audience, nonce string) (tokenClaims, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return tokenClaims{}, errors.New("invalid OpenAI identity token")
-	}
-	h, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return tokenClaims{}, err
-	}
-	var header struct{ Alg, Kid string }
-	if json.Unmarshal(h, &header) != nil || header.Alg != "RS256" {
-		return tokenClaims{}, errors.New("unsupported identity-token signature")
-	}
-	key, err := s.jwk(ctx, header.Kid)
-	if err != nil {
-		return tokenClaims{}, err
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return tokenClaims{}, err
-	}
-	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if err = rsa.VerifyPKCS1v15(key, crypto.SHA256, sum[:], sig); err != nil {
-		return tokenClaims{}, errors.New("OpenAI identity-token signature validation failed")
-	}
-	body, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return tokenClaims{}, err
-	}
-	var c tokenClaims
-	if err = json.Unmarshal(body, &c); err != nil {
-		return c, err
-	}
-	if c.Issuer != "https://auth.openai.com" || !audienceMatch(c.Audience, audience) || c.Nonce != nonce || c.Subject == "" || time.Now().Unix() >= c.Exp {
-		return c, errors.New("OpenAI identity token claims did not validate")
-	}
-	return c, nil
-}
-
-func audienceMatch(raw any, want string) bool {
-	switch v := raw.(type) {
-	case string:
-		return v == want
-	case []any:
-		for _, x := range v {
-			if x == want {
-				return true
-			}
-		}
-	}
-	return false
-}
-func (s *Service) jwk(ctx context.Context, kid string) (*rsa.PublicKey, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://auth.openai.com/.well-known/jwks.json", nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var raw struct {
-		Keys []struct {
-			Kid string `json:"kid"`
-			Kty string `json:"kty"`
-			N   string `json:"n"`
-			E   string `json:"e"`
-		} `json:"keys"`
-	}
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("JWKS returned HTTP %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&raw); err != nil {
-		return nil, err
-	}
-	for _, k := range raw.Keys {
-		if k.Kid != kid || k.Kty != "RSA" {
-			continue
-		}
-		n, err := base64.RawURLEncoding.DecodeString(k.N)
-		if err != nil {
-			return nil, err
-		}
-		e, err := base64.RawURLEncoding.DecodeString(k.E)
-		if err != nil || len(e) > 4 {
-			return nil, errors.New("invalid OpenAI JWKS exponent")
-		}
-		exp := 0
-		for _, b := range e {
-			exp = exp<<8 | int(b)
-		}
-		return &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: exp}, nil
-	}
-	return nil, errors.New("OpenAI signing key was not found")
 }
 
 func (s *Service) accountTokens(ctx context.Context, model string) (*account, error) {
@@ -546,36 +314,35 @@ func (s *Service) accountTokens(ctx context.Context, model string) (*account, er
 }
 
 func (s *Service) refreshAccount(ctx context.Context, old account) (account, error) {
-	form := url.Values{}
-	form.Set("grant_type", "refresh_token")
-	form.Set("client_id", old.ClientID)
-	form.Set("refresh_token", old.RefreshToken)
-	form.Set("resource", resource)
-	var tok struct {
-		Access  string `json:"access_token"`
-		Refresh string `json:"refresh_token"`
-		Expires int64  `json:"expires_in"`
-	}
-	if err := s.postForm(ctx, tokenURL, form, &tok); err != nil {
+	refreshed, err := Refresh(ctx, s.client, DefaultConfig(), TokenData{
+		AccessToken:  old.AccessToken,
+		RefreshToken: old.RefreshToken,
+		IDToken:      old.IDToken,
+		AccountID:    old.ID,
+		Email:        old.Email,
+		ExpiresAt:    old.ExpiresAt,
+	})
+	if err != nil {
 		return account{}, fmt.Errorf("refresh Codex account %s: %w", old.ID, err)
 	}
-	if tok.Access == "" {
-		return account{}, errors.New("OpenAI refresh did not return an access token")
-	}
-	old.AccessToken = tok.Access
-	if tok.Refresh != "" {
-		old.RefreshToken = tok.Refresh
-	}
-	if tok.Expires > 0 {
-		old.ExpiresAt = time.Now().Add(time.Duration(tok.Expires) * time.Second)
+	old.AccessToken = refreshed.AccessToken
+	old.RefreshToken = refreshed.RefreshToken
+	old.IDToken = refreshed.IDToken
+	old.ExpiresAt = refreshed.ExpiresAt
+	old.ClientID = DefaultClientID
+	if email := strings.TrimSpace(refreshed.Email); email != "" {
+		old.Email = email
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.state.Accounts {
-		if s.state.Accounts[i].ID == old.ID && s.state.Accounts[i].ClientID == old.ClientID {
+		if s.state.Accounts[i].ID == old.ID {
 			s.state.Accounts[i].AccessToken = old.AccessToken
 			s.state.Accounts[i].RefreshToken = old.RefreshToken
+			s.state.Accounts[i].IDToken = old.IDToken
 			s.state.Accounts[i].ExpiresAt = old.ExpiresAt
+			s.state.Accounts[i].ClientID = old.ClientID
+			s.state.Accounts[i].Email = old.Email
 			if err := s.saveLocked(); err != nil {
 				return account{}, err
 			}
@@ -613,43 +380,20 @@ func (s *Service) RefreshModels(ctx context.Context) error {
 				continue
 			}
 		}
-		req, err := http.NewRequestWithContext(pollCtx, http.MethodGet, modelsURL, nil)
-		if err != nil {
-			cancel()
-			continue
-		}
-		req.Header.Set("Authorization", "Bearer "+a.AccessToken)
-		resp, err := s.client.Do(req)
-		if err != nil {
-			cancel()
-			continue
-		}
-		var payload struct {
-			Models []struct {
-				Slug       string `json:"slug"`
-				Name       string `json:"display_name"`
-				Visibility string `json:"visibility"`
-			} `json:"models"`
-		}
-		if resp.StatusCode/100 == 2 {
-			err = json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&payload)
-		} else {
-			err = fmt.Errorf("HTTP %d", resp.StatusCode)
-		}
-		resp.Body.Close()
+		names, _, err := FetchModels(pollCtx, s.client, DefaultCodexBase, Credential{AccessToken: a.AccessToken, AccountID: a.ID})
 		cancel()
 		if err != nil {
 			continue
 		}
-		models := make([]Model, 0, len(payload.Models))
-		for _, m := range payload.Models {
-			if m.Slug != "" && m.Visibility == "list" {
-				models = append(models, Model{ID: m.Slug, DisplayName: m.Name, OwnedBy: "openai"})
+		models := make([]Model, 0, len(names))
+		for _, name := range names {
+			if name != "" {
+				models = append(models, Model{ID: name, OwnedBy: "openai"})
 			}
 		}
 		s.mu.Lock()
 		for i := range s.state.Accounts {
-			if s.state.Accounts[i].ID == a.ID && s.state.Accounts[i].ClientID == a.ClientID {
+			if s.state.Accounts[i].ID == a.ID {
 				s.state.Accounts[i].Models = models
 				s.state.Accounts[i].ModelsAt = time.Now().UTC()
 				changed = true
@@ -870,14 +614,10 @@ func (s *Service) ProxyResponses(w http.ResponseWriter, r *http.Request, model s
 }
 
 func (s *Service) sendResponse(ctx context.Context, body []byte, a account) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responsesURL, bytes.NewReader(body))
+	req, err := NewUpstreamRequest(ctx, DefaultCodexBase, body, strings.TrimSpace(a.ID), a.AccessToken, true)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+a.AccessToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("User-Agent", "zenflash-codex-experimental/1.0")
 	return s.client.Do(req)
 }
 func (s *Service) ModelAccountCount(model string) int {

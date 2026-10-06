@@ -17,7 +17,6 @@
   let codexModels = $state<any[]>([]);
   let codexAuthUrl = $state("");
   let codexCallbackUrl = $state("");
-  let codexRetryClientID = $state("");
   let codexBusy = $state(false);
   let codexLoading = $state(true);
   let codexNotice = $state("");
@@ -75,7 +74,7 @@
     } catch (e) { flash(String(e)); }
   }
 
-  onMount(() => { codexRetryClientID = sessionStorage.getItem("zenflash_codex_retry_client_id") ?? ""; load(); loadAccounts(); loadCodex(); loadOAuthAccounts(); });
+  onMount(() => { load(); loadAccounts(); loadCodex(); loadOAuthAccounts(); });
   let clineTimer: any;
   async function startCline() {
     clineBusy = true;
@@ -140,7 +139,7 @@
     codexNotice = "Starting a fresh sign-in…";
     codexNoticeKind = "info";
     try {
-      const r = await post<any>("/api/codex/login/start", { client_id: codexRetryClientID });
+      const r = await post<any>("/api/codex/login/start", {});
       if (!r?.auth_url) throw new Error(r?.error?.message ?? "Could not start Codex sign-in");
       codexAuthUrl = r.auth_url;
       codexNotice = "Sign-in link ready. Open it once, approve access, then copy the full localhost callback address into the field below.";
@@ -149,15 +148,8 @@
     finally { codexBusy = false; }
   }
 
-  async function startNewCodexRegistration() {
-    codexRetryClientID = "";
-    sessionStorage.removeItem("zenflash_codex_retry_client_id");
-    await startCodex();
-  }
-
   async function completeCodex() {
     if (!codexCallbackUrl.trim()) return;
-    let callbackClientID = codexRetryClientID;
     codexBusy = true;
     codexNotice = "Sending callback to ZenFlash…";
     codexNoticeKind = "info";
@@ -165,31 +157,20 @@
       const callbackURL = codexCallbackUrl.trim().replace(/\s+/g, "");
       const parsed = new URL(callbackURL);
       if (parsed.protocol !== "http:" || !["127.0.0.1:1455", "localhost:1455"].includes(parsed.host) || parsed.pathname !== "/auth/callback") {
-        throw new Error("Paste the full http://127.0.0.1:1455/auth/callback address from the browser.");
+        throw new Error("Paste the full http://localhost:1455/auth/callback address from the browser.");
       }
       for (const key of ["code", "state"]) {
         if (!parsed.searchParams.get(key)) throw new Error(`Callback URL is missing ${key}. Copy the complete browser address.`);
       }
-      callbackClientID = parsed.searchParams.get("client_id") || codexRetryClientID;
-      if (!callbackClientID) throw new Error("Callback URL is missing client_id. Copy the complete address bar URL.");
       const r = await post<any>("/api/codex/login/complete", { callback_url: callbackURL });
       if (r?.error) throw new Error(r.error.message ?? JSON.stringify(r.error));
       codexCallbackUrl = "";
       codexAuthUrl = "";
-      codexRetryClientID = "";
-      sessionStorage.removeItem("zenflash_codex_retry_client_id");
       codexNotice = `Codex account connected${r?.account?.email ? ` · ${r.account.email}` : ""}. Models are refreshing now.`;
       codexNoticeKind = "success";
       await loadCodex();
     } catch (e) {
-      const message = String(e);
-      if (message.includes("invalid_grant") && callbackClientID.startsWith("oaiapp_")) {
-        codexRetryClientID = callbackClientID;
-        sessionStorage.setItem("zenflash_codex_retry_client_id", callbackClientID);
-        codexNotice = "OpenAI rejected that one-time code. Retry this same account; ZenFlash will reuse its issued client ID as OpenAI requires.";
-      } else {
-        codexNotice = `Sign-in did not complete: ${message}. Start a fresh sign-in and use its callback URL.`;
-      }
+      codexNotice = `Sign-in did not complete: ${String(e)}. Start a fresh sign-in and use its callback URL.`;
       codexNoticeKind = "error";
     }
     finally { codexBusy = false; }
@@ -407,12 +388,12 @@
           <div class="cline-connect">
             <div class="codex-symbol" aria-hidden="true">⌘</div>
             <div class="cline-copy"><div class="eyebrow">CODEX · SIGN IN WITH CHATGPT</div><h3>Codex accounts</h3><p>Pool linked accounts across the Codex models available to them.</p></div>
-            <div class="codex-actions"><button class="btn-primary" onclick={startCodex} disabled={codexBusy}>{codexBusy ? "Please wait…" : codexRetryClientID ? "Retry same account" : "Add Codex account"}</button>{#if codexRetryClientID}<button class="btn-ghost" onclick={startNewCodexRegistration} disabled={codexBusy}>Add a different account</button>{/if}</div>
+            <div class="codex-actions"><button class="btn-primary" onclick={startCodex} disabled={codexBusy}>{codexBusy ? "Please wait…" : "Add Codex account"}</button></div>
           </div>
           <div class="codex-login">
             {#if codexAuthUrl}<a class="btn-ghost" href={codexAuthUrl} target="_blank" rel="noreferrer">Continue with ChatGPT ↗</a>{/if}
-            <p>1. Click <strong>{codexRetryClientID ? "Retry same account" : "Add Codex account"}</strong> to create a sign-in link. 2. Open that link once and approve. 3. Copy the full 127.0.0.1 callback address here. OpenAI requires this loopback callback for Codex plan access.</p>
-            <div class="manual-key-row"><input aria-label="OAuth callback URL" autocomplete="off" placeholder="Paste http://127.0.0.1:1455/auth/callback?..." bind:value={codexCallbackUrl} /><button class="btn-primary" onclick={completeCodex} disabled={codexBusy || !codexCallbackUrl.trim()}>{codexBusy ? "Connecting…" : "Finish sign-in"}</button></div>
+            <p>1. Click <strong>Add Codex account</strong> to create a sign-in link. 2. Open that link once and approve. 3. Copy the full localhost callback address here. OpenAI requires this loopback callback for Codex plan access.</p>
+            <div class="manual-key-row"><input aria-label="OAuth callback URL" autocomplete="off" placeholder="Paste http://localhost:1455/auth/callback?..." bind:value={codexCallbackUrl} /><button class="btn-primary" onclick={completeCodex} disabled={codexBusy || !codexCallbackUrl.trim()}>{codexBusy ? "Connecting…" : "Finish sign-in"}</button></div>
             {#if codexNotice}<div class="codex-notice" class:error={codexNoticeKind === "error"} class:success={codexNoticeKind === "success"} role="status" aria-live="polite">{codexNotice}</div>{/if}
           </div>
           <div class="account-list-head codex-list-head"><div><h3>Linked Codex accounts</h3><p>{codexAccounts.length} connected · upstream monthly remaining quota is not exposed</p></div><button class="btn-ghost" onclick={refreshCodex} disabled={codexBusy}>{codexBusy ? "Refreshing…" : "Refresh models"}</button></div>
