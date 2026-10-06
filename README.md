@@ -418,6 +418,22 @@ else. Build assets: `cd webui && npm ci && npm run build`. The compiled `webui/d
 - Set a strong `webui.password`; it is migrated to Argon2id on first start and the plaintext backup is removed.
 - Do not commit `config.json` with real keys.
 
+## Secrets & environment
+
+One template works everywhere: `.env.example`. Non-sensitive values are
+pre-filled; important secrets stay empty with comments.
+
+| Secret | Where it lives | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | Koyeb env vars (Secret) or GitHub Secrets, or local `.env` | Empty = file-backed state. Must be `postgres://`, TLS required |
+| `WEBUI_PASSWORD` | Same as above | Empty = set it in Settings UI after first boot |
+| `ANTIGRAVITY_OAUTH_CLIENTS` | Same as above | `key\|client_id\|client_secret;…` tuples, never committed |
+
+Local runs: copy `.env.example` to `.env` next to `compose.yaml` and fill
+the secrets there (gitignored). Koyeb: paste each line under service
+Settings → Environment variables and redeploy. Never commit real values —
+only secret *names* live in git, values live in Koyeb/GitHub.
+
 ## Troubleshooting
 
 | Symptom | Check |
