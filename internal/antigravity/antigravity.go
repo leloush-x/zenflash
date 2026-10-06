@@ -222,6 +222,9 @@ func codeChallenge(verifier string) string {
 }
 
 // BuildAuthorizeURL builds the Google Desktop OAuth URL (loopback callback required).
+// CodeChallenge exposes the PKCE S256 challenge for dashboard login flows.
+func CodeChallenge(verifier string) string { return codeChallenge(verifier) }
+
 func BuildAuthorizeURL(redirectURI, state, challenge string) (string, error) {
 	redirectURI = strings.TrimSpace(redirectURI)
 	if redirectURI == "" || strings.TrimSpace(state) == "" || strings.TrimSpace(challenge) == "" {

@@ -74,6 +74,9 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("POST /api/oauth/antigravity/import", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthImport("antigravity")))))
 	mux.Handle("POST /api/oauth/antigravity/delete", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthDelete("antigravity")))))
 	mux.Handle("POST /api/oauth/refresh", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthRefresh))))
+	mux.Handle("POST /api/oauth/login/start", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthLoginStart))))
+	mux.Handle("POST /api/oauth/login/complete", a.authenticate(a.csrf(http.HandlerFunc(a.handleOAuthLoginComplete))))
+	mux.HandleFunc("GET /oauth-callback", a.handleOAuthCallback)
 	if a.codex != nil {
 		mux.Handle("POST /api/codex/login/start", a.authenticate(a.csrf(http.HandlerFunc(a.handleCodexLoginStart))))
 		mux.Handle("POST /api/codex/login/complete", a.authenticate(a.csrf(http.HandlerFunc(a.handleCodexLoginComplete))))

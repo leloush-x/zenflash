@@ -273,6 +273,37 @@
     finally { oauthBusy = ""; }
   }
 
+  let browserLogin = $state<any>(null);
+  let browserBusy = $state(false);
+  let callbackUrl = $state("");
+
+  async function startBrowserLogin() {
+    browserBusy = true;
+    try {
+      const r = await post<any>("/api/oauth/login/start", { provider: "antigravity" });
+      if (r?.auth_url && r?.session_id) {
+        browserLogin = { sessionId: r.session_id, authUrl: r.auth_url, done: false };
+        callbackUrl = "";
+      } else flash("sign-in start failed: " + JSON.stringify(r?.error ?? r).slice(0, 120));
+    } catch (e) { flash(`sign-in start failed: ${e}`); }
+    finally { browserBusy = false; }
+  }
+
+  async function completeBrowserLogin() {
+    if (!callbackUrl.trim()) return;
+    browserBusy = true;
+    try {
+      const r = await post<any>("/api/oauth/login/complete", { session_id: browserLogin.sessionId, callback_url: callbackUrl.trim() });
+      if (r?.account) {
+        flash(`Antigravity connected as ${r.account.email || r.account.id}`);
+        browserLogin = null;
+        callbackUrl = "";
+        oauthAccounts = r?.accounts ?? oauthAccounts;
+      } else flash("sign-in failed: " + JSON.stringify(r?.error ?? r).slice(0, 140));
+    } catch (e) { flash(`sign-in failed: ${e}`); }
+    finally { browserBusy = false; }
+  }
+
   async function refreshOAuthTokens() {
     oauthBusy = "refresh";
     try {
@@ -453,6 +484,15 @@
         {:else}
           <div class="settings-card account-empty"><div class="empty-mark">G</div><h3>No Antigravity accounts</h3><p>Paste a refresh token below or run the CLI login on the gateway host.</p></div>
         {/if}
+        <div class="settings-card cline-card">
+          <div class="cline-connect">
+            <div class="cline-symbol" aria-hidden="true">G</div><div class="cline-copy"><div class="eyebrow">BROWSER SIGN IN</div><h3>Connect with Google</h3><p>Approve in your browser, then paste the loopback address back here. Works from any machine.</p></div>
+            {#if !browserLogin || browserLogin?.done}<button class="btn-primary" onclick={startBrowserLogin} disabled={browserBusy}>{browserBusy ? "Starting…" : "Connect with Google"}</button>{/if}
+          </div>
+          {#if browserLogin && !browserLogin?.done}
+            <div class="oauth-approval"><div><div class="eyebrow">WAITING FOR APPROVAL</div><strong>Approve, then paste the redirect address</strong><p>Copy the full http://127.0.0.1:51121/oauth-callback?... address from your browser bar.</p></div><div class="manual-key-row"><input class="token-field" autocomplete="off" placeholder="Paste http://127.0.0.1:51121/oauth-callback?..." bind:value={callbackUrl} /><button class="btn-primary" onclick={completeBrowserLogin} disabled={browserBusy || !callbackUrl.trim()}>{browserBusy ? "Connecting…" : "Finish sign-in"}</button></div><a href={browserLogin.authUrl} target="_blank" rel="noreferrer">Open Google sign-in ↗</a><button class="text-action" onclick={() => browserLogin = null}>Cancel sign-in</button></div>
+          {/if}
+        </div>
         <details class="manual-import"><summary>Connect Antigravity with a refresh token</summary><div class="manual-import-body"><p>The token is refreshed and synced (profile, project, models) before it is stored.</p><div class="manual-key-row"><input class="token-field" type="password" autocomplete="off" placeholder="Paste Google refresh token" bind:value={antigravityToken} /><button class="btn-ghost" onclick={() => importOAuthToken("antigravity")} disabled={!antigravityToken.trim() || !!oauthBusy}>{oauthBusy === "antigravity" ? "Checking…" : "Validate and add"}</button></div><p>Or on the gateway host: <code>zenflash-llm login antigravity</code></p></div></details>
       </section>
     {:else}

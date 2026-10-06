@@ -475,3 +475,31 @@ func (m *RuntimeManager) RefreshOAuthAccounts(ctx context.Context) {
 	}
 	runtime.gateway.RefreshOAuthAccounts(ctx)
 }
+
+// StartBrowserLogin creates a dashboard sign-in session and returns its link.
+func (m *RuntimeManager) StartBrowserLogin(ctx context.Context, provider, redirectURI string) (sessionID, authURL string, err error) {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return "", "", fmt.Errorf("gateway runtime is unavailable")
+	}
+	_ = ctx
+	return runtime.gateway.BrowserLoginStart(provider, redirectURI)
+}
+
+// CompleteBrowserLogin exchanges a pasted callback URL for stored credentials.
+func (m *RuntimeManager) CompleteBrowserLogin(ctx context.Context, sessionID, callbackURL string) (OAuthAccount, error) {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return OAuthAccount{}, fmt.Errorf("gateway runtime is unavailable")
+	}
+	return runtime.gateway.BrowserLoginComplete(ctx, sessionID, callbackURL)
+}
+
+// CompleteBrowserLoginByState serves the public /oauth-callback endpoint.
+func (m *RuntimeManager) CompleteBrowserLoginByState(ctx context.Context, code, state string) (OAuthAccount, error) {
+	runtime := m.current.Load()
+	if runtime == nil || runtime.gateway == nil {
+		return OAuthAccount{}, fmt.Errorf("gateway runtime is unavailable")
+	}
+	return runtime.gateway.BrowserLoginCompleteByState(ctx, code, state)
+}
