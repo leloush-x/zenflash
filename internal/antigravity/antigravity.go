@@ -94,10 +94,18 @@ func oauthClientsFromEnv() []oauthClient {
 	return out
 }
 
+// builtinOAuthClient is the official Antigravity desktop OAuth client. Its
+// values ship inside community clients (codex2api, sub2api, opencode) and act
+// as the zero-config fallback. Operator-configured clients via
+// ANTIGRAVITY_OAUTH_CLIENTS always win when present.
+func builtinOAuthClient() oauthClient {
+	return oauthClient{Key: "official", ID: DefaultClientID, Secret: "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"}
+}
+
 // activeOAuthClient resolves the OAuth client selected by
 // ANTIGRAVITY_OAUTH_CLIENT_KEY (default "official").
 func activeOAuthClient() (oauthClient, error) {
-	clients := oauthClientsFromEnv()
+	clients := append(oauthClientsFromEnv(), builtinOAuthClient())
 	if len(clients) == 0 {
 		return oauthClient{}, errors.New("no Antigravity OAuth client configured; set ANTIGRAVITY_OAUTH_CLIENTS to key|client_id|client_secret")
 	}
