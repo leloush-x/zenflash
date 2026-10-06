@@ -128,6 +128,17 @@ func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	route := a.manager.DebugRoute(model, input.Protocol)
+	// Service (encrypted-store) Codex accounts bypass the file-based pools,
+	// so the gateway catalog cannot route them. Serve those models straight
+	// through the Codex service like the public WrapAPI does.
+	useCodexService := input.Key.Mode == "auto" && a.codex != nil && a.codex.HasModel(model) && route.RouteError != ""
+	if useCodexService {
+		route.RouteError = ""
+		route.Tier = config.TierCodex
+		route.Anonymous = false
+		route.NativeProtocol = protocol.Responses
+		route.ProtocolSource = "codex-service"
+	}
 	if selectedKey != nil {
 		selected, routeErr := a.manager.DebugRouteForTier(model, selectedKey.Tier)
 		if routeErr != nil {
@@ -160,7 +171,17 @@ func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
 	request.Header.Set("Accept", "application/json")
 	recorder := newDebugResponseRecorder()
 	started := time.Now()
-	a.manager.Handler().ServeHTTP(recorder, request)
+	if useCodexService {
+		converted, convErr := protocol.ConvertRequest(input.Protocol, protocol.Responses, payload)
+		if convErr != nil {
+			writeAdminError(w, http.StatusBadRequest, "invalid_request", convErr.Error())
+			return
+		}
+		converted["model"] = model
+		a.codex.ProxyResponses(recorder, request, model, converted, input.Protocol, false)
+	} else {
+		a.manager.Handler().ServeHTTP(recorder, request)
+	}
 	duration := time.Since(started)
 	requestID := recorder.Header().Get("x-request-id")
 	if trace.Channel != "" {
