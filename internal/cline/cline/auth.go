@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"zenflash-llm/internal/cline/kit"
+	"zenflash-llm/internal/config"
 )
 
 const (
@@ -379,5 +380,5 @@ func OpenBrowser(url string) error {
 }
 
 func IsWindows() bool {
-	return strings.Contains(strings.ToLower(os.Getenv("OS")), "windows")
+	return config.IsWindows()
 }

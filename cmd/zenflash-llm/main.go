@@ -20,6 +20,7 @@ import (
 	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/gateway"
+	"zenflash-llm/internal/store"
 	"zenflash-llm/internal/telemetry"
 )
 
@@ -71,8 +72,8 @@ func main() {
 	listen := flag.String("listen", "", "override the configured API listen address")
 	webListen := flag.String("web-listen", "", "override the configured WebUI listen address")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	clineHost := flag.String("cline-host", "127.0.0.1", "embedded Cline proxy listen host")
-	clinePort := flag.Int("cline-port", 3457, "embedded Cline proxy listen port; 0 disables it")
+	clineHost := flag.String("cline-host", config.DefaultClineHost, "embedded Cline proxy listen host")
+	clinePort := flag.Int("cline-port", config.DefaultClinePort, "embedded Cline proxy listen port; 0 disables it")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("zenflash-llm", buildinfo.Version)
@@ -90,10 +91,10 @@ func main() {
 	if *webListen != "" {
 		cfg.WebUI.Listen = *webListen
 	}
-	if v := os.Getenv("WEBUI_USERNAME"); v != "" {
+	if v := config.LoadEnvOnce().WebUIUsername; v != "" {
 		cfg.WebUI.Username = v
 	}
-	if v := os.Getenv("WEBUI_PASSWORD"); v != "" {
+	if v := config.LoadEnvOnce().WebUIPassword; v != "" {
 		cfg.WebUI.Password = v
 	}
 
@@ -112,6 +113,27 @@ func main() {
 	redactor.Replace(cfg)
 	logger := telemetry.NewStructuredLogger(level, hub, redactor)
 	monitor := telemetry.NewMonitor()
+	env := config.LoadEnvOnce()
+	if err := env.Validate(); err != nil {
+		logger.Error("invalid environment", "error", err)
+		slog.Error("invalid environment", "error", err)
+		os.Exit(1)
+	}
+	var durable *store.Store
+	if env.DatabaseURL != "" {
+		ds, err := store.Open(ctx, env.DatabaseURL, logger)
+		if err != nil {
+			logger.Error("postgres unavailable at startup; continuing with file state", "error", err)
+		} else if ds != nil {
+			durable = ds
+			defer durable.Close()
+			rawCfg, _ := os.ReadFile(*configPath)
+			_ = durable.SeedKeys(ctx, cfg.ServerKeys)
+			if _, ierr := durable.ImportOnce(ctx, *configPath, rawCfg); ierr != nil {
+				logger.Warn("postgres import skipped", "error", ierr)
+			}
+		}
+	}
 	clineURL := ""
 	if *clinePort != 0 {
 		clineURL = fmt.Sprintf("http://%s:%d", *clineHost, *clinePort)
@@ -123,10 +145,13 @@ func main() {
 		}()
 		// The first catalog refresh races the Cline proxy startup; give it a
 		// brief head start so the go tier actually enumerates on cold boots.
-		waitForHTTP(ctx, clineURL+"/health", 10*time.Second, logger)
+		waitForHTTP(ctx, clineURL+"/health", config.ClineReadyTimeout, logger)
 	}
 
 	manager, err := gateway.NewRuntimeManager(ctx, *configPath, cfg, logger, monitor, hub, redactor, level)
+	if err == nil && durable != nil {
+		manager.SetStore(durable)
+	}
 	if err != nil {
 		logger.Error("failed to initialize runtime", "component", "runtime", "event", "runtime_initialization_failed", "error", err)
 		os.Exit(1)
@@ -146,7 +171,7 @@ func main() {
 		apiHandler = root
 		if cfg.WebUI.Listen != "" && cfg.WebUI.Listen != cfg.Listen {
 			webServer := &http.Server{
-				Addr: cfg.WebUI.Listen, Handler: admin.Handler(), ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
+				Addr: cfg.WebUI.Listen, Handler: admin.Handler(), ReadHeaderTimeout: config.ReadHeaderTimeout, IdleTimeout: config.IdleTimeout,
 			}
 			servers = append(servers, webServer)
 			go serveHTTP(cancel, logger, webServer, "webui")
@@ -154,13 +179,13 @@ func main() {
 	}
 	apiHandler = codexService.WrapAPI(apiHandler, func() []string { return manager.Config().ServerKeys })
 	apiServer := &http.Server{
-		Addr: cfg.Listen, Handler: apiHandler, ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
+		Addr: cfg.Listen, Handler: apiHandler, ReadHeaderTimeout: config.ReadHeaderTimeout, IdleTimeout: config.IdleTimeout,
 	}
 	servers = append(servers, apiServer)
 	go serveHTTP(cancel, logger, apiServer, "api")
 
 	<-ctx.Done()
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 	defer shutdownCancel()
 	for _, server := range servers {
 		if err := server.Shutdown(shutdownCtx); err != nil {
@@ -181,7 +206,7 @@ func serveHTTP(cancel context.CancelFunc, logger *slog.Logger, server *http.Serv
 // elapses. It is only used to order startup work, so a slow or absent target
 // must not block boot: the gateway still comes up after timeout.
 func waitForHTTP(ctx context.Context, url string, timeout time.Duration, logger *slog.Logger) {
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: config.HTTPClientTimeout}
 	deadline := time.Now().Add(timeout)
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -199,7 +224,7 @@ func waitForHTTP(ctx context.Context, url string, timeout time.Duration, logger 
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(config.ClineReadyInterval):
 		}
 	}
 }

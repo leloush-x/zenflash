@@ -131,14 +131,14 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	cfg := Config{
-		Listen:      "127.0.0.1:8080",
-		Upstream:    UpstreamConfig{Zen: "https://opencode.ai/zen", Go: "https://opencode.ai/zen/go"},
-		Retry:       RetryConfig{MaxAttempts: 3, TimeoutSeconds: 300},
-		Models:      ModelsConfig{RefreshSeconds: 300, Protocols: map[string]string{}},
-		Performance: PerformanceConfig{MaxIdleConns: 2048, MaxIdleConnsPerHost: 256, MaxConnsPerHost: 0, IdleConnTimeoutSeconds: 120, ConnectTimeoutSeconds: 5, FailureCooldownSeconds: 15},
-		Logging:     LoggingConfig{Level: "info", RingSize: 2000},
-		WebUI:       WebUIConfig{Listen: "0.0.0.0:8081", SessionTTLMinutes: 720},
-		Prefer:      TierGo,
+		Listen:      DefaultAPIListen,
+		Upstream:    UpstreamConfig{Zen: DefaultUpstreamZen, Go: DefaultUpstreamGo},
+		Retry:       RetryConfig{MaxAttempts: DefaultRetryMaxAttempts, TimeoutSeconds: DefaultRetryTimeoutSeconds},
+		Models:      ModelsConfig{RefreshSeconds: DefaultModelsRefreshSeconds, Protocols: map[string]string{}},
+		Performance: PerformanceConfig{MaxIdleConns: DefaultPerfMaxIdleConns, MaxIdleConnsPerHost: DefaultPerfMaxIdleConnsPerHost, MaxConnsPerHost: DefaultPerfMaxConnsPerHost, IdleConnTimeoutSeconds: DefaultPerfIdleConnTimeoutSeconds, ConnectTimeoutSeconds: DefaultPerfConnectTimeoutSeconds, FailureCooldownSeconds: DefaultPerfFailureCooldownSeconds},
+		Logging:     LoggingConfig{Level: DefaultLogLevel, RingSize: DefaultLogRingSize},
+		WebUI:       WebUIConfig{Listen: DefaultWebUIEnabledListen, SessionTTLMinutes: DefaultWebUISessionTTLMinutes},
+		Prefer:      DefaultPreferTier,
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()

@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"zenflash-llm/internal/config"
 )
 
 const (
@@ -70,7 +71,7 @@ type oauthClient struct {
 // knowledge, but the secret stays out of the repository.
 func oauthClientsFromEnv() []oauthClient {
 	out := []oauthClient{}
-	for _, entry := range strings.Split(os.Getenv("ANTIGRAVITY_OAUTH_CLIENTS"), ";") {
+	for _, entry := range strings.Split(config.LoadEnvOnce().AntigravityOAuthClients, ";") {
 		parts := strings.Split(entry, "|")
 		if len(parts) < 3 {
 			continue
@@ -109,7 +110,7 @@ func activeOAuthClient() (oauthClient, error) {
 	if len(clients) == 0 {
 		return oauthClient{}, errors.New("no Antigravity OAuth client configured; set ANTIGRAVITY_OAUTH_CLIENTS to key|client_id|client_secret")
 	}
-	want := strings.ToLower(strings.TrimSpace(os.Getenv("ANTIGRAVITY_OAUTH_CLIENT_KEY")))
+	want := strings.ToLower(strings.TrimSpace(config.LoadEnvOnce().AntigravityOAuthClientKey))
 	if want == "" {
 		want = "official"
 	}
