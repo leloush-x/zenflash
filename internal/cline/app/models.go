@@ -69,20 +69,25 @@ func initModelsCache() {
 	modelsCache = make(map[string]*ModelInfo)
 }
 
-// mergePublicFreeModels folds ids from the public list into the cache using
-// the dynamic free-naming rule. Returns the number of newly added ids.
-func mergePublicFreeModels(ids []string) int {
+// mergePublicModels folds every id from the public list into the cache.
+// Free-ness stays a dynamic naming rule (isPublicFreeModel): free ids get
+// Cost "free", the rest keep Cost "" (the public list carries no pricing).
+// Returns the number of newly added ids.
+func mergePublicModels(ids []string) int {
 	modelsMu.Lock()
 	defer modelsMu.Unlock()
 	added := 0
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
-		if id == "" || !isPublicFreeModel(id) {
+		if id == "" {
 			continue
 		}
+		free := isPublicFreeModel(id)
 		if cached, ok := modelsCache[id]; ok {
-			cached.Source = "free"
-			cached.Cost = "free"
+			if free {
+				cached.Source = "free"
+				cached.Cost = "free"
+			}
 			cached.Status = ModelActive
 			cached.SyncedAt = time.Now()
 			continue
@@ -91,21 +96,37 @@ func mergePublicFreeModels(ids []string) int {
 		if i := indexByte(id, '/'); i >= 0 {
 			provider = id[:i]
 		}
-		modelsCache[id] = &ModelInfo{
+		m := &ModelInfo{
 			ID:             id,
-			Source:         "free",
+			Source:         "public",
 			Provider:       provider,
-			Cost:           "free",
 			Status:         ModelActive,
 			RequiresStream: indexByte(id, ':') < 0,
 			SyncedAt:       time.Now(),
 		}
+		if free {
+			m.Source = "free"
+			m.Cost = "free"
+		}
+		modelsCache[id] = m
 		added++
 	}
 	return added
 }
 
-func getFreeModels() []*ModelInfo {
+func sortedModelSlice(in []*ModelInfo) []*ModelInfo {
+	for i := 1; i < len(in); i++ {
+		for j := i; j > 0; j-- {
+			if in[j-1].ID < in[j].ID {
+				break
+			}
+			in[j-1], in[j] = in[j], in[j-1]
+		}
+	}
+	return in
+}
+
+func getAllModels() []*ModelInfo {
 	initModelsCache()
 	modelsMu.Lock()
 	defer modelsMu.Unlock()
@@ -114,12 +135,15 @@ func getFreeModels() []*ModelInfo {
 		cp := *m
 		out = append(out, &cp)
 	}
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0; j-- {
-			if out[j-1].ID < out[j].ID {
-				break
-			}
-			out[j-1], out[j] = out[j], out[j-1]
+	return sortedModelSlice(out)
+}
+
+func getFreeModels() []*ModelInfo {
+	all := getAllModels()
+	out := all[:0]
+	for _, m := range all {
+		if m.Cost == "free" {
+			out = append(out, m)
 		}
 	}
 	return out
@@ -246,7 +270,7 @@ func syncPublicModels() (int, error) {
 	for _, m := range payload.Data {
 		ids = append(ids, m.ID)
 	}
-	added := mergePublicFreeModels(ids)
+	added := mergePublicModels(ids)
 	modelsMu.Lock()
 	modelsLastSync = time.Now()
 	modelsMu.Unlock()
@@ -301,14 +325,18 @@ func getDefaultModel() string {
 			return defaultModel
 		}
 	}
+	// Prefer a free model as the automatic default; fall back to any known
+	// id only when no free model has synced yet. Never invent a hardcoded id.
+	for _, m := range modelsCache {
+		if m.Status == ModelActive && m.Cost == "free" {
+			return m.ID
+		}
+	}
 	for _, m := range modelsCache {
 		if m.Status == ModelActive {
 			return m.ID
 		}
 	}
-	// Cache empty (no sync yet): return whatever operator configured, even
-	// if empty. Callers forward it and upstream answers authoritatively
-	// instead of us inventing a hardcoded model.
 	return defaultModel
 }
 
@@ -324,7 +352,7 @@ func normalizeRequestModel(id string) string {
 
 func apiModelList() []map[string]any {
 	out := make([]map[string]any, 0, len(modelsCache))
-	for _, m := range getFreeModels() {
+	for _, m := range getAllModels() {
 		out = append(out, map[string]any{
 			"id":             m.ID,
 			"object":         "model",
@@ -366,7 +394,7 @@ func startModelsRefresher() {
 // behavior. The gateway uses it to advertise the Cline tier separately from
 // OpenCode Go.
 func ClineModelIDs() []string {
-	models := getFreeModels()
+	models := getAllModels()
 	out := make([]string, 0, len(models))
 	for _, m := range models {
 		if m != nil && m.ID != "" {
@@ -380,7 +408,7 @@ func ClineModelIDs() []string {
 // with display metadata. Used to enrich the gateway Cline tier without
 // changing pool behavior.
 func ClineModelDetails() []ModelInfo {
-	models := getFreeModels()
+	models := getAllModels()
 	out := make([]ModelInfo, 0, len(models))
 	for _, m := range models {
 		if m == nil || m.ID == "" {
