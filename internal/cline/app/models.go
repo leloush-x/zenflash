@@ -55,7 +55,7 @@ const publicModelsURL = cline.ClineAPIBase + "/models"
 // free-tier model. Rule-based, not a hardcoded list: upstream marks free
 // models with a ":free" (or "-free") suffix.
 func isPublicFreeModel(id string) bool {
-	return strings.HasSuffix(id, ":free") || strings.HasSuffix(id, "-free")
+	return strings.HasSuffix(id, ":free") || strings.HasSuffix(id, "-free") || strings.HasSuffix(id, "/free")
 }
 
 func initModelsCache() {
