@@ -3,7 +3,7 @@ config.json
 config.json.bak
 .config-*.tmp
 *.models.dev.json
-opencode/
+/opencode/
 /zenflash-llm
 /zenflash-llm.exe
 *.log
