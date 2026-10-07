@@ -27,7 +27,22 @@ const (
 	RequestHeader         = "x-opencode-request"
 	ProjectHeader         = "x-opencode-project"
 	ParentSessionHeader   = "x-parent-session-id"
+	ModelHeader           = "x-opencode-model"
 )
+
+// ClientVersions is the rotated OpenCode client release line sent upstream.
+// Rotating within the current 1.18.x line keeps retries looking like separate
+// healthy CLI clients instead of one gateway hammering the same identity.
+var ClientVersions = []string{"1.18.31", "1.18.30", "1.18.29", "1.18.28"}
+
+// ClientUserAgent returns the rotated CLI user agent for an attempt index.
+func ClientUserAgent(attempt int) string {
+	v := ClientVersions[attempt%len(ClientVersions)]
+	if attempt < 0 {
+		v = ClientVersions[0]
+	}
+	return "opencode/" + v + " (" + ClientValue + ")"
+}
 
 // Credentials normalizes configured static keys: trimmed, empties dropped,
 // order preserved. Config input is already trimmed at load, so this is an
@@ -47,12 +62,24 @@ func Credentials(keys []string) []string {
 // affinity. The legacy x-opencode-session header stays so older Zen
 // deployments continue to recognize the request.
 func SetSessionHeaders(h http.Header, ids identity.RequestIDs) {
+	SetSessionHeadersForAttempt(h, ids, 0, "")
+}
+
+// SetSessionHeadersForAttempt stamps the same correlation headers, but each
+// retry attempt gets a fresh request ID, a rotated CLI user agent, and the
+// served model. That matches real CLI behavior across retries: same session
+// and project, new request identity every attempt.
+func SetSessionHeadersForAttempt(h http.Header, ids identity.RequestIDs, attempt int, model string) {
 	h.Set(ClientHeader, ClientValue)
+	h.Set("User-Agent", ClientUserAgent(attempt))
 	h.Set(SessionHeader, ids.Session)
 	h.Set(SessionAffinityHeader, ids.Session)
 	h.Set(SessionIDHeader, ids.Session)
-	h.Set(RequestHeader, ids.Request)
+	h.Set(RequestHeader, ids.ScopedRequest(attempt))
 	h.Set(ProjectHeader, ids.Project)
+	if model != "" {
+		h.Set(ModelHeader, model)
+	}
 	if ids.ParentSession != "" {
 		h.Set(ParentSessionHeader, ids.ParentSession)
 	}

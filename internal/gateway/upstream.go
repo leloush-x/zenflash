@@ -286,7 +286,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 			httpx.DrainAndClose(lastResponse.Body)
 			lastResponse = nil
 		}
-		req, err := newUpstreamRequest(ctx, g.cfg.Upstream.Zen, route.Protocol, body, ids, opencode.AnonymousKey)
+		req, err := newUpstreamRequestForAttempt(ctx, g.cfg.Upstream.Zen, route.Protocol, body, ids, opencode.AnonymousKey, attemptOffset+attempts, route.ID)
 		if err != nil {
 			return nil, err, attempts
 		}
@@ -617,7 +617,7 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 			return nil, err, 1
 		}
 	} else {
-		req, err = newUpstreamRequest(ctx, baseURL, route.ProtocolFor(override.Tier), body, ids, node.key)
+		req, err = newUpstreamRequestForAttempt(ctx, baseURL, route.ProtocolFor(override.Tier), body, ids, node.key, attemptOffset, route.ID)
 	}
 	if err != nil {
 		return nil, err, 0
@@ -737,7 +737,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		if route.Tier == config.TierCodex {
 			req, err = codex.NewUpstreamRequest(ctx, baseURL, body, node.accountID, node.key, true)
 		} else {
-			req, err = newUpstreamRequest(ctx, baseURL, route.Protocol, body, ids, node.key)
+			req, err = newUpstreamRequestForAttempt(ctx, baseURL, route.Protocol, body, ids, node.key, attemptOffset+attempts, route.ID)
 		}
 		if err != nil {
 			return nil, err, attempts
@@ -874,6 +874,14 @@ func (g *Gateway) recordUpstreamAttempt(ctx context.Context, route models.Route,
 }
 
 func newUpstreamRequest(ctx context.Context, baseURL string, protocol wire.Protocol, body []byte, ids identity.RequestIDs, key string) (*http.Request, error) {
+	return newUpstreamRequestForAttempt(ctx, baseURL, protocol, body, ids, key, 0, "")
+}
+
+// newUpstreamRequestForAttempt builds one OpenCode upstream request. The
+// session and project stay stable per conversation while every attempt gets a
+// fresh request ID, a rotated CLI user agent, and the served model header,
+// matching genuine OpenCode CLI retry behavior.
+func newUpstreamRequestForAttempt(ctx context.Context, baseURL string, protocol wire.Protocol, body []byte, ids identity.RequestIDs, key string, attempt int, model string) (*http.Request, error) {
 	endpoint := strings.TrimRight(baseURL, "/") + wire.Path(protocol)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -881,8 +889,7 @@ func newUpstreamRequest(ctx context.Context, baseURL string, protocol wire.Proto
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("User-Agent", httpx.UserAgent())
-	opencode.SetSessionHeaders(req.Header, ids)
+	opencode.SetSessionHeadersForAttempt(req.Header, ids, attempt, model)
 	if protocol == wire.Anthropic {
 		req.Header.Set("x-api-key", key)
 		req.Header.Set("anthropic-version", "2023-06-01")

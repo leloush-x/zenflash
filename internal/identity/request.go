@@ -59,6 +59,18 @@ func DeriveRequestIDs(r *http.Request, body map[string]any) RequestIDs {
 	}
 }
 
+// ScopedRequest returns a deterministic per-attempt request ID derived from
+// the base request ID. The session and project stay stable across retries
+// while each upstream attempt carries a fresh request identity, matching
+// real CLI retry behavior.
+func (ids RequestIDs) ScopedRequest(attempt int) string {
+	if attempt <= 0 {
+		return ids.Request
+	}
+	sum := sha256.Sum256([]byte(ids.Request + "\x00" + fmt.Sprint(attempt)))
+	return "req_" + hex.EncodeToString(sum[:12])
+}
+
 func conversationSeed(body map[string]any) string {
 	if input, ok := body["input"].(string); ok && input != "" {
 		return input
