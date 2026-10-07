@@ -29,7 +29,28 @@ import (
 	"time"
 
 	wire "zenflash-llm/internal/protocol"
+	"zenflash-llm/internal/store"
 )
+
+// serviceStore is the optional Postgres home for linked Codex accounts. When
+// nil, accounts live only in the encrypted file beside the config.
+var serviceStore *store.Store
+
+// SetServiceStore attaches the Postgres account home. Nil restores file-only mode.
+func SetServiceStore(s *store.Store) {
+	serviceStore = s
+}
+
+// serviceAccountID keys one linked account row; stable across refreshes.
+func serviceAccountID(a account, i int) string {
+	if a.ID != "" {
+		return a.ID
+	}
+	if a.Email != "" {
+		return a.Email
+	}
+	return fmt.Sprintf("account-%d", i)
+}
 
 type Model struct {
 	ID          string `json:"id"`
@@ -127,6 +148,7 @@ func New(path string) (*Service, error) {
 func (s *Service) load() error {
 	b, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
+		s.restoreServiceAccounts()
 		return nil
 	}
 	if err != nil {
@@ -186,7 +208,69 @@ func (s *Service) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(name, s.path)
+	if err := os.Rename(name, s.path); err != nil {
+		return err
+	}
+	mirrorServiceAccounts(plain)
+	return nil
+}
+
+// mirrorServiceAccounts copies linked accounts plus the install host ID to
+// Postgres. It reuses the bytes just written to disk, so it takes no locks
+// and is safe under any caller locking discipline. The encrypted file write
+// above already succeeded, so DB trouble never fails a login or refresh.
+func mirrorServiceAccounts(plain []byte) {
+	if serviceStore == nil {
+		return
+	}
+	var state diskState
+	if json.Unmarshal(plain, &state) != nil {
+		return
+	}
+	ids := make([]string, 0, len(state.Accounts)+1)
+	payloads := make([][]byte, 0, len(state.Accounts)+1)
+	for i, a := range state.Accounts {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, serviceAccountID(a, i))
+		payloads = append(payloads, raw)
+	}
+	if host, err := json.Marshal(map[string]string{"host_id": state.HostID}); err == nil {
+		ids = append(ids, "_meta")
+		payloads = append(payloads, host)
+	}
+	serviceStore.OAuthSave(context.Background(), "codex-service", ids, payloads)
+}
+
+// restoreServiceAccounts rebuilds linked accounts from Postgres when the
+// encrypted file is gone (fresh host, wiped volume).
+func (s *Service) restoreServiceAccounts() {
+	if serviceStore == nil {
+		return
+	}
+	raw := serviceStore.OAuthList(context.Background(), "codex-service")
+	if len(raw) == 0 {
+		return
+	}
+	var state diskState
+	for _, b := range raw {
+		var meta map[string]string
+		if json.Unmarshal(b, &meta) == nil && meta["host_id"] != "" && len(b) < 256 {
+			state.HostID = meta["host_id"]
+			continue
+		}
+		var a account
+		if json.Unmarshal(b, &a) == nil && (a.ID != "" || a.Email != "" || a.RefreshToken != "") {
+			state.Accounts = append(state.Accounts, a)
+		}
+	}
+	if len(state.Accounts) == 0 && state.HostID == "" {
+		return
+	}
+	// load() runs single-threaded at startup; no lock needed here.
+	s.state = state
 }
 
 // StartLogin returns a Codex CLI PKCE authorization link and a state-bound

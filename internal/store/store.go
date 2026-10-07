@@ -33,6 +33,7 @@ type Store struct {
 	mu        sync.RWMutex
 	keyHash   map[string]struct{}
 	keyOrder  []string
+	flagSet   map[string]struct{}
 	lastSync  time.Time
 	slotCount int
 
@@ -243,12 +244,14 @@ func (s *Store) keyRefreshLoop() {
 	t := time.NewTicker(config.AuthKeyTTL)
 	defer t.Stop()
 	s.refreshKeys()
+	s.refreshFlags()
 	for {
 		select {
 		case <-s.quit:
 			return
 		case <-t.C:
 			s.refreshKeys()
+			s.refreshFlags()
 		}
 	}
 }

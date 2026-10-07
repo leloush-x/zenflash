@@ -156,6 +156,7 @@ func main() {
 	if err == nil && durable != nil {
 		manager.SetStore(durable)
 		codex.SetStore(durable)
+		codex.SetServiceStore(durable)
 		antigravity.SetStore(durable)
 	}
 	if err != nil {
