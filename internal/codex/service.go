@@ -171,6 +171,13 @@ func (s *Service) load() error {
 	b, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.restoreServiceAccounts()
+		if len(s.state.Accounts) > 0 || s.state.HostID != "" {
+			// Persist the Postgres-restored state immediately so a restart
+			// without DATABASE_URL still keeps the linked accounts.
+			if serr := s.saveLocked(); serr != nil {
+				return serr
+			}
+		}
 		return nil
 	}
 	if err != nil {
@@ -372,7 +379,10 @@ func (s *Service) CompleteLogin(ctx context.Context, raw string) (AccountView, e
 		s.state.Accounts = append(s.state.Accounts, acc)
 	}
 	if err := s.saveLocked(); err != nil {
-		return AccountView{}, err
+		// Surface the exact disk failure instead of a generic login error:
+		// on read-only volumes this is the difference between "OAuth broke"
+		// and "credentials could not be written".
+		return AccountView{}, fmt.Errorf("save Codex credentials: %w", err)
 	}
 	go func() {
 		pollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

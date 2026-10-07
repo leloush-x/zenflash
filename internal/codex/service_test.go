@@ -65,3 +65,53 @@ func TestStartLoginIgnoresLegacyIssuedClientID(t *testing.T) {
 		t.Fatalf("legacy client ID leaked into authorization URL: %q", got)
 	}
 }
+
+func TestCompleteLoginPersistsAccountToDisk(t *testing.T) {
+	dir := t.TempDir()
+	service, err := New(filepath.Join(dir, "codex.enc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.StartLogin("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := started["state"]
+	if state == "" {
+		t.Fatal("login start must return a state")
+	}
+	service.mu.Lock()
+	_, ok := service.pending[state]
+	service.mu.Unlock()
+	if !ok {
+		t.Fatal("login session was not tracked")
+	}
+	// Exercise the same disk write CompleteLogin performs after a successful
+	// OAuth exchange, without network access.
+	service.mu.Lock()
+	service.state.Accounts = append(service.state.Accounts, account{
+		ID: "acc-1", Email: "user@example.com", ClientID: DefaultClientID,
+		AccessToken: "access-123", RefreshToken: "refresh-123",
+	})
+	saveErr := service.saveLocked()
+	service.mu.Unlock()
+	if saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	// A fresh Service on the same path must see the linked account: this is
+	// the regression test for logins that vanished after restart/redeploy.
+	reloaded, err := New(filepath.Join(dir, "codex.enc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range reloaded.Accounts() {
+		if a.ID == "acc-1" || a.Email == "user@example.com" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("reloaded accounts missing login: %+v", reloaded.Accounts())
+	}
+}
