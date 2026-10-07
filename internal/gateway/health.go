@@ -149,15 +149,14 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	now := time.Now().Unix()
 	routes, _ := g.availableModels()
-	// Usable-tier view: ?free=1 keeps anonymous-eligible free models plus
-	// linked-account tiers (Codex service accounts, Antigravity free-tier
-	// quota). Pure paid upstream models stay hidden. OpenCode's anonymous
-	// free lane is currently restricted upstream, so account tiers are what
-	// actually serve.
+	// Free-only view: ?free=1 keeps anonymous-eligible free models on every
+	// tier and drops paid models everywhere, including linked-account tiers.
+	// The dashboard catalog uses this so operators only see servable free
+	// models; use ?all=1 or no filter for the complete machine listing.
 	if r != nil && (r.URL.Query().Get("free") == "1" || r.URL.Query().Get("free") == "true") {
 		kept := routes[:0]
 		for _, route := range routes {
-			if g.catalog.IsFreeModel(route.ID) || route.Tier == config.TierCodex || route.Tier == config.TierAntigravity {
+			if g.catalog.IsFreeModel(route.ID) {
 				kept = append(kept, route)
 			}
 		}
@@ -257,12 +256,6 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 		if md.StructuredOutput {
 			entry["structured_output"] = true
 		}
-		data = append(data, entry)
-		// Pin aliases: a raw ID advertised on several sources lists one
-		// alias per usable source (opencode/<id>, cline/<id>, go/<id>) so
-		// clients can pin a provider. The bare ID is kept for backward
-		// compatibility and follows prefer-order routing. A Cline login
-		// only unlocks cline/<id>, never go/<id>.
 		tiers := g.catalog.TiersForModel(model)
 		hasZen, hasGoCatalog, hasClineCatalog := false, false, false
 		for _, tr := range tiers {
@@ -274,17 +267,19 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 				hasClineCatalog = true
 			}
 		}
-		if (hasZen && hasGoCatalog) || (hasZen && hasClineCatalog) || (hasGoCatalog && hasClineCatalog) {
-			aliasTiers := make([]config.Tier, 0, 3)
-			if hasZen && (g.zenNodes.Len() > 0 || g.cfg.Anonymous) {
-				aliasTiers = append(aliasTiers, config.TierZen)
-			}
-			if hasGoCatalog && g.goNodes.Len() > 0 && g.hasGoKeys() && !opencode.IsClineUpstream(g.cfg.Upstream.Go) {
-				aliasTiers = append(aliasTiers, config.TierGo)
-			}
-			if hasClineCatalog && g.goNodes.Len() > 0 && g.hasGoKeys() {
-				aliasTiers = append(aliasTiers, config.TierCline)
-			}
+		aliasTiers := make([]config.Tier, 0, 3)
+		if hasZen && (g.zenNodes.Len() > 0 || g.cfg.Anonymous) {
+			aliasTiers = append(aliasTiers, config.TierZen)
+		}
+		if hasGoCatalog && g.goNodes.Len() > 0 && g.hasGoKeys() && !opencode.IsClineUpstream(g.cfg.Upstream.Go) {
+			aliasTiers = append(aliasTiers, config.TierGo)
+		}
+		if hasClineCatalog && g.goNodes.Len() > 0 && g.hasGoKeys() {
+			aliasTiers = append(aliasTiers, config.TierCline)
+		}
+		if len(aliasTiers) > 1 {
+			// Shared model: emit one pinned row per source and skip the bare
+			// ID so the same model never appears twice.
 			for _, aliasTier := range aliasTiers {
 				amd := g.catalog.MetadataForTier(model, aliasTier)
 				amdMap := map[string]any{}
@@ -358,7 +353,9 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 				}
 				data = append(data, alias)
 			}
+			continue
 		}
+		data = append(data, entry)
 	}
 	// Deprecated entries stay visible but sink to the bottom so clients and
 	// the dashboard stop surfacing them first. Separate backing arrays keep
