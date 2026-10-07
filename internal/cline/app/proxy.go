@@ -16,7 +16,9 @@ import (
 	"zenflash-llm/internal/cline/kit"
 )
 
-var defaultModel = "deepseek/deepseek-v4-flash"
+// defaultModel is operator-configurable (persisted in the pool file) and starts
+// empty: with dynamic model discovery there is no safe hardcoded default.
+var defaultModel = ""
 
 var proxyListenAddress = "0.0.0.0:3457"
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 	"zenflash-llm/internal/cline/cline"
@@ -78,13 +79,12 @@ func HasActiveClineAccount() bool {
 
 // setDefaultModel 持久化默认模型：更新内存全局并写入账号池文件
 func setDefaultModel(modelID string) {
-	initModelsCache()
-	modelsMu.Lock()
-	_, ok := modelsCache[modelID]
-	modelsMu.Unlock()
-	if !ok {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
 		return
 	}
+	// Dynamic: accept any id (cache may be empty pre-sync); upstream answers
+	// authoritatively for unknown ids.
 	defaultModel = modelID
 	p := loadPool()
 	poolMu.Lock()

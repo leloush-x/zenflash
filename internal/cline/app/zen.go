@@ -22,41 +22,41 @@ type ZenModel struct {
 	Aliases []string `json:"aliases,omitempty"`
 	Context int      `json:"context"`
 	Output  int      `json:"output"`
-	Source  string   `json:"source"` // seed=内置 / synced=动态同步
-}
-
-var zenSeedModels = []ZenModel{
-	{"deepseek-v4-flash-free", []string{"deepseek-v4-flash", "deepseek-v4"}, 200000, 128000, "seed"},
-	{"mimo-v2.5-free", []string{"mimo-v2.5", "mimo"}, 200000, 32000, "seed"},
-	{"ling-3.0-flash-free", []string{"ling-3.0-flash", "ling"}, 200000, 32768, "seed"},
-	{"nemotron-3-ultra-free", []string{"nemotron-3-ultra", "nemotron"}, 1000000, 128000, "seed"},
-	{"north-mini-code-free", []string{"north-mini-code", "north-mini"}, 256000, 64000, "seed"},
-	{"laguna-s-2.1-free", []string{"laguna-s-2.1", "laguna"}, 200000, 32768, "seed"},
-	{"longcat-2.0-free", []string{"longcat-2.0", "longcat"}, 200000, 32768, "seed"},
-	{"big-pickle", nil, 200000, 32000, "seed"},
+	Source  string   `json:"source"` // always "synced": tables fill only from upstream
 }
 
 var (
 	zenModelsMu sync.RWMutex
-	zenModels   = make(map[string]*ZenModel) // 主表:ID
-	zenAliases  = make(map[string]*ZenModel) // 别名表
+	zenModels   = make(map[string]*ZenModel) // 主表:ID, only from upstream sync
+	zenAliases  = make(map[string]*ZenModel) // 别名表, derived dynamically from synced ids
 )
 
 const zenAPIBase = "https://opencode.ai/zen/v1"
 
 func initZenModels() {
+	// No hardcoded seeds: tables fill only from the upstream sync.
+	// Ensure maps exist for tests that reset them to nil.
 	zenModelsMu.Lock()
 	defer zenModelsMu.Unlock()
-	if len(zenModels) > 0 {
-		return
+	if zenModels == nil {
+		zenModels = make(map[string]*ZenModel)
 	}
-	for _, m := range zenSeedModels {
-		cp := m
-		zenModels[cp.ID] = &cp
-		for _, a := range cp.Aliases {
-			zenAliases[a] = &cp
-		}
+	if zenAliases == nil {
+		zenAliases = make(map[string]*ZenModel)
 	}
+}
+
+// zenAliasFor derives the short alias for a synced id: strip a trailing
+// "-free"/":free" marker ("deepseek-v4-flash-free" -> "deepseek-v4-flash").
+// Returns "" when the id carries no free marker.
+func zenAliasFor(id string) string {
+	if strings.HasSuffix(id, "-free") {
+		return strings.TrimSuffix(id, "-free")
+	}
+	if strings.HasSuffix(id, ":free") {
+		return strings.TrimSuffix(id, ":free")
+	}
+	return ""
 }
 
 // resolveZenModel 解析模型名到 zen 模型。支持 "opencode/<id>" 前缀与别名。
@@ -86,12 +86,12 @@ func resolveZenModel(id string) (*ZenModel, bool) {
 	return nil, false
 }
 
-// isZenFreeModel 免费判定: seed 白名单 或 ID 带 -free 后缀
+// isZenFreeModel 免费判定: dynamic suffix rule only, no seed whitelist.
 func isZenFreeModel(m *ZenModel) bool {
 	if m == nil {
 		return false
 	}
-	return m.Source == "seed" || strings.HasSuffix(m.ID, "-free")
+	return strings.HasSuffix(m.ID, "-free") || strings.HasSuffix(m.ID, ":free")
 }
 
 // resolveZenFreeModel 只解析免费 zen 模型
@@ -542,15 +542,11 @@ func syncZenModels() (int, error) {
 	defer zenModelsMu.Unlock()
 	added := 0
 	for _, item := range payload.Data {
-		id := item.ID
+		id := strings.TrimSpace(item.ID)
 		if id == "" {
 			continue
 		}
 		if _, ok := zenModels[id]; ok {
-			continue
-		}
-		// 跳过与免费模型别名冲突的 ID(如付费的 deepseek-v4-flash),保证别名解析不被覆盖
-		if _, conflict := zenAliases[id]; conflict {
 			continue
 		}
 		// 新模型:默认按 200K 上下文接入,输出按 32K
@@ -559,6 +555,13 @@ func syncZenModels() (int, error) {
 			Context: 200000,
 			Output:  32768,
 			Source:  "synced",
+		}
+		// Derive the short alias dynamically so "opencode/<short>" and bare
+		// "<short>" keep resolving to the synced free model.
+		if alias := zenAliasFor(id); alias != "" {
+			if _, taken := zenModels[alias]; !taken {
+				zenAliases[alias] = zenModels[id]
+			}
 		}
 		added++
 	}
@@ -569,7 +572,7 @@ func syncZenModels() (int, error) {
 func startZenModelsRefresher() {
 	go func() {
 		if _, err := syncZenModels(); err != nil {
-			log.Printf("zen model sync: failed (%v), using seed list", err)
+			log.Printf("zen model sync: failed (%v), catalog stays empty until next sync", err)
 		}
 		ticker := time.NewTicker(10 * time.Minute)
 		for range ticker.C {

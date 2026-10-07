@@ -46,12 +46,16 @@ const (
 
 const recommendedModelsURL = cline.ClineAPIBase + "/ai/cline/recommended-models"
 
-func seedModelCandidates() []*ModelInfo {
-	return []*ModelInfo{
-		{ID: "deepseek/deepseek-v4-flash", Source: "free", Provider: "deepseek", Cost: "free", RequiresStream: true},
-		{ID: "poolside/laguna-s-2.1:free", Source: "free", Provider: "poolside", Cost: "free"},
-		{ID: "stepfun/step-3.7-flash", Source: "free", Provider: "stepfun", Cost: "free", RequiresStream: true},
-	}
+// publicModelsURL is the unauthenticated OpenAI-compatible model list. It
+// carries no pricing field; free models are identified dynamically by the
+// upstream ":free" / "-free" naming rule (see isPublicFreeModel).
+const publicModelsURL = cline.ClineAPIBase + "/models"
+
+// isPublicFreeModel reports whether an id from the public model list is a
+// free-tier model. Rule-based, not a hardcoded list: upstream marks free
+// models with a ":free" (or "-free") suffix.
+func isPublicFreeModel(id string) bool {
+	return strings.HasSuffix(id, ":free") || strings.HasSuffix(id, "-free")
 }
 
 func initModelsCache() {
@@ -60,10 +64,45 @@ func initModelsCache() {
 	if modelsCache != nil {
 		return
 	}
+	// No hardcoded seeds: the cache fills only from upstream syncs
+	// (authenticated recommended-models + public /models list).
 	modelsCache = make(map[string]*ModelInfo)
-	for _, m := range seedModelCandidates() {
-		modelsCache[m.ID] = m
+}
+
+// mergePublicFreeModels folds ids from the public list into the cache using
+// the dynamic free-naming rule. Returns the number of newly added ids.
+func mergePublicFreeModels(ids []string) int {
+	modelsMu.Lock()
+	defer modelsMu.Unlock()
+	added := 0
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || !isPublicFreeModel(id) {
+			continue
+		}
+		if cached, ok := modelsCache[id]; ok {
+			cached.Source = "free"
+			cached.Cost = "free"
+			cached.Status = ModelActive
+			cached.SyncedAt = time.Now()
+			continue
+		}
+		provider := id
+		if i := indexByte(id, '/'); i >= 0 {
+			provider = id[:i]
+		}
+		modelsCache[id] = &ModelInfo{
+			ID:             id,
+			Source:         "free",
+			Provider:       provider,
+			Cost:           "free",
+			Status:         ModelActive,
+			RequiresStream: indexByte(id, ':') < 0,
+			SyncedAt:       time.Now(),
+		}
+		added++
 	}
+	return added
 }
 
 func getFreeModels() []*ModelInfo {
@@ -176,6 +215,44 @@ func syncRecommendedModels() (int, error) {
 	return added, nil
 }
 
+// syncPublicModels merges the unauthenticated public model list into the
+// cache using the dynamic free-naming rule. It needs no login, so free
+// models are visible pre-login and when the authenticated feed fails.
+func syncPublicModels() (int, error) {
+	initModelsCache()
+	req, err := http.NewRequest("GET", publicModelsURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("X-Task-ID", fmt.Sprintf("sess_sync_%d", time.Now().UnixMilli()))
+	client := &http.Client{Timeout: modelsSyncTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return 0, err
+	}
+	ids := make([]string, 0, len(payload.Data))
+	for _, m := range payload.Data {
+		ids = append(ids, m.ID)
+	}
+	added := mergePublicFreeModels(ids)
+	modelsMu.Lock()
+	modelsLastSync = time.Now()
+	modelsMu.Unlock()
+	return added, nil
+}
+
 func indexByte(s string, b byte) int {
 	for i := 0; i < len(s); i++ {
 		if s[i] == b {
@@ -200,13 +277,15 @@ func syncModelsOnce() {
 		modelsMu.Unlock()
 	}()
 
-	added, err := syncRecommendedModels()
-	if err != nil {
-		log.Printf("  model sync: failed (%v), using cached list", err)
-		return
+	if added, err := syncRecommendedModels(); err != nil {
+		log.Printf("  model sync: recommended feed failed (%v)", err)
+	} else if added > 0 {
+		log.Printf("  model sync: %d new free models from recommended feed", added)
 	}
-	if added > 0 {
-		log.Printf("  model sync: %d new free models from official feed", added)
+	if added, err := syncPublicModels(); err != nil {
+		log.Printf("  model sync: public feed failed (%v)", err)
+	} else if added > 0 {
+		log.Printf("  model sync: %d new free models from public feed", added)
 	} else {
 		log.Printf("  model sync: %d free models up to date", len(getFreeModels()))
 	}
@@ -217,14 +296,19 @@ func getDefaultModel() string {
 	modelsMu.Lock()
 	defer modelsMu.Unlock()
 
-	if m, ok := modelsCache[defaultModel]; ok && m.Status == ModelActive {
-		return defaultModel
+	if defaultModel != "" {
+		if m, ok := modelsCache[defaultModel]; ok && m.Status == ModelActive {
+			return defaultModel
+		}
 	}
 	for _, m := range modelsCache {
 		if m.Status == ModelActive {
 			return m.ID
 		}
 	}
+	// Cache empty (no sync yet): return whatever operator configured, even
+	// if empty. Callers forward it and upstream answers authoritatively
+	// instead of us inventing a hardcoded model.
 	return defaultModel
 }
 
@@ -233,15 +317,9 @@ func normalizeRequestModel(id string) string {
 	if id == "" {
 		return getDefaultModel()
 	}
-	initModelsCache()
-	modelsMu.Lock()
-	_, ok := modelsCache[id]
-	modelsMu.Unlock()
-	if ok {
-		return id
-	}
-	log.Printf("  model %q not in free list, fallback to %q", id, getDefaultModel())
-	return getDefaultModel()
+	// Dynamic: pass unknown ids through untouched so newly rotated upstream
+	// models work before the next sync learns them.
+	return id
 }
 
 func apiModelList() []map[string]any {

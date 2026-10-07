@@ -956,14 +956,7 @@ func handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.DefaultModel != "" {
-		initModelsCache()
-		modelsMu.Lock()
-		_, ok := modelsCache[req.DefaultModel]
-		modelsMu.Unlock()
-		if !ok {
-			writeAPI(w, http.StatusBadRequest, apiResponse{Error: "unknown model: " + req.DefaultModel})
-			return
-		}
+		// Dynamic: accept any id; upstream answers authoritatively.
 		setDefaultModel(req.DefaultModel)
 		changed = true
 	}
