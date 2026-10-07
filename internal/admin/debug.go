@@ -99,7 +99,7 @@ func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !protocol.Valid(input.Protocol) {
-		writeAdminError(w, http.StatusBadRequest, "invalid_protocol", "protocol must be chat, responses, or anthropic")
+		writeAdminError(w, http.StatusBadRequest, "invalid_protocol", "protocol must be chat, responses, anthropic, or systemone")
 		return
 	}
 	if input.Request == nil {

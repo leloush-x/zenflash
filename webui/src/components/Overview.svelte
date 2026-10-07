@@ -13,6 +13,28 @@
   const sparkTok = $derived(sparkline(series.map((b: any) => b.total_tokens)));
   const recent = $derived((upstream?.requests ?? []).slice(-30).reverse());
   const started = $derived(m?.started_at);
+  const resModels = $derived(live?.resources?.models ?? {});
+  const resKeys = $derived(live?.resources?.keys ?? []);
+  const resProxies = $derived(live?.resources?.proxies ?? []);
+  const tierRows = $derived(
+    (["zen", "go", "cline", "codex", "antigravity"] as const).map((tier) => {
+      const keys = tier === "cline" ? [] : resKeys.filter((k: any) => k.tier === tier);
+      const cooling = keys.filter((k: any) => k.cooldown_until).length;
+      const models = Number(resModels[tier] ?? 0);
+      const state = tier === "cline" ? (models > 0 ? "ok" : "down") : keys.length - cooling > 0 ? "ok" : keys.length > 0 ? "warn" : "down";
+      return {
+        tier,
+        label: tier === "zen" || tier === "go" ? `OpenCode ${tier === "zen" ? "Zen" : "Go"}` : tier[0].toUpperCase() + tier.slice(1),
+        keys: tier === "cline" ? "pool" : String(keys.length),
+        models: String(models),
+        cooling,
+        state,
+      };
+    }),
+  );
+  const proxyHealth = $derived(
+    resProxies.length ? `${resProxies.filter((p: any) => p.healthy).length}/${resProxies.length} healthy` : "none configured",
+  );
 </script>
 
 {#snippet tile(label: string, value: string, sub = "", tone = "", i = 0)}
@@ -101,6 +123,24 @@
     </div>
   </section>
 </div>
+
+<section class="panel fade-up mt-3 p-4" style="--d:190ms">
+  <div class="eyebrow">upstream status</div>
+  <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+    {#each tierRows as row (row.tier)}
+      <div class="flex min-w-0 items-center gap-2.5 rounded-xl border border-[color:var(--color-edge)] bg-[oklch(0.115_0.011_272/0.7)] p-2.5">
+        <span class="pill" class:good={row.state === "ok"} class:warn={row.state === "warn"} class:bad={row.state === "down"}>{row.state}</span>
+        <div class="min-w-0">
+          <div class="truncate text-[12px] font-semibold">{row.label}</div>
+          <div class="truncate font-mono text-[10px] text-[color:var(--color-dim)]">{row.keys} keys · {row.models} models{#if row.cooling} · {row.cooling} cooling{/if}</div>
+        </div>
+      </div>
+    {/each}
+  </div>
+  <div class="mt-2 flex items-baseline justify-between gap-3 border-t border-[color:var(--color-edge)]/60 pt-2 text-[13px]">
+    <span class="dim">proxies</span><span class="tnum">{proxyHealth}{live?.resources?.models?.stale ? " · catalog stale" : ""}</span>
+  </div>
+</section>
 
 <section class="panel fade-up mt-3 p-4" style="--d:200ms">
   <div class="eyebrow">recent upstream requests</div>

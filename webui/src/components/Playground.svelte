@@ -55,7 +55,6 @@
   );
   const filteredModels = $derived(
     catalogRows.filter((m: any) => {
-      if (m.route_protocol === "systemone" || m.native_protocol === "systemone") return false;
       if (!showDeprecated && m._deprecated) return false;
       if (sourceFilter !== "all" && m.source !== sourceFilter) return false;
       return true;
@@ -66,7 +65,7 @@
     Object.fromEntries(
       sourceOrder.map((key) => [
         key,
-        catalogRows.filter((m: any) => m.source === key && m.route_protocol !== "systemone" && m.native_protocol !== "systemone" && (showDeprecated || !m._deprecated)).length,
+        catalogRows.filter((m: any) => m.source === key && (showDeprecated || !m._deprecated)).length,
       ]),
     ),
   );
@@ -78,11 +77,24 @@
   const keys = $derived(data?.keys ?? { zen: [], go: [], codex: [], antigravity: [] });
   const selected = $derived(filteredModels.find((m: any) => m.id === model) ?? null);
   const selectedDeprecated = $derived(selected?._deprecated === true);
+  const selectedSystemOne = $derived(selected?.route_protocol === "systemone" || selected?.native_protocol === "systemone");
+  let soState = $state("1 + 1 = 2");
+  let soQuestion = $state("Is 1 + 1 equal to 2?");
+  let lastModel = $state("");
   const keyOptions = $derived(keys[keyTier] ?? []);
 
   $effect(() => {
     if (filteredModels.length && !filteredModels.some((m: any) => m.id === model)) {
       model = filteredModels[0].id;
+    }
+  });
+
+  // The protocol follows the model: SystemOne models take decision payloads,
+  // message models take chat/responses/anthropic.
+  $effect(() => {
+    if (model !== lastModel) {
+      lastModel = model;
+      protocol = selectedSystemOne ? "systemone" : protocol === "systemone" ? "chat" : protocol;
     }
   });
 
@@ -108,6 +120,19 @@
     busy = true;
     out = null;
     try {
+      const key: Record<string, any> = { mode: keyMode };
+      if (keyMode === "selected") {
+        key.tier = keyTier;
+        key.id = keyId;
+      }
+      if (protocol === "systemone") {
+        out = await post("/api/debug/inference", {
+          protocol,
+          key,
+          request: { model, state: soState, questions: { q1: { type: "noul", instructions: soQuestion } } },
+        });
+        return;
+      }
       const request: Record<string, any> = { model, messages: [{ role: "user", content: prompt }] };
       if (protocol === "responses") {
         delete request.messages;
@@ -118,11 +143,6 @@
         if (protocol === "chat") request.reasoning_effort = effort;
         else if (protocol === "responses") request.reasoning = { effort };
         else request.output_config = { effort };
-      }
-      const key: Record<string, any> = { mode: keyMode };
-      if (keyMode === "selected") {
-        key.tier = keyTier;
-        key.id = keyId;
       }
       out = await post("/api/debug/inference", { protocol, key, request });
     } catch (e) {
@@ -178,6 +198,7 @@
         <option value="chat">chat</option>
         <option value="responses">responses</option>
         <option value="anthropic">anthropic</option>
+        {#if selectedSystemOne}<option value="systemone">systemone</option>{/if}
       </select>
       <button onclick={run} disabled={busy || !model || selectedDeprecated} class="btn-primary shrink-0 px-6">
         {busy ? "running…" : "run"}
@@ -237,13 +258,31 @@
 
 <div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
   <div class="card fade-up flex flex-col" style="--d:60ms">
-    <div class="eyebrow">prompt</div>
-    <textarea
-      rows="8"
-      class="min-h-28 w-full grow rounded-lg !bg-[oklch(0.14_0.012_272)] font-mono text-[13px] sm:min-h-32"
-      placeholder="Type your prompt…"
-      bind:value={prompt}
-    ></textarea>
+    {#if protocol === "systemone"}
+      <div class="eyebrow">state</div>
+      <textarea
+        rows="3"
+        class="w-full rounded-lg !bg-[oklch(0.14_0.012_272)] font-mono text-[13px]"
+        placeholder="Situation the model decides on…"
+        bind:value={soState}
+      ></textarea>
+      <div class="eyebrow mt-3">question (yes/no)</div>
+      <textarea
+        rows="4"
+        class="w-full grow rounded-lg !bg-[oklch(0.14_0.012_272)] font-mono text-[13px]"
+        placeholder="Question to decide…"
+        bind:value={soQuestion}
+      ></textarea>
+      <p class="mt-2 text-[11px] text-[color:var(--color-faint)]">sent as a decision payload to <code>/v1/systemone</code>.</p>
+    {:else}
+      <div class="eyebrow">prompt</div>
+      <textarea
+        rows="8"
+        class="min-h-28 w-full grow rounded-lg !bg-[oklch(0.14_0.012_272)] font-mono text-[13px] sm:min-h-32"
+        placeholder="Type your prompt…"
+        bind:value={prompt}
+      ></textarea>
+    {/if}
   </div>
 
   <div class="card fade-up flex flex-col" style="--d:100ms">

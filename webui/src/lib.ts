@@ -126,10 +126,15 @@ export function withNewSecret(arr: any[], value: string) {
 
 export const EFFORTS = ["", "minimal", "low", "medium", "high", "xhigh", "max", "none"] as const;
 
-/** Extract the assistant reply text from a chat/responses/anthropic response body. */
+/** Extract the assistant reply text from a chat/responses/anthropic/systemone response body. */
 export function replyText(resp: any): string {
   if (resp == null) return "";
   if (typeof resp === "string") return resp;
+  if (resp.answers && typeof resp.answers === "object") {
+    return Object.entries(resp.answers)
+      .map(([key, a]: [string, any]) => `${key}: ${a?.type ?? ""}${a?.noul !== undefined ? `=${a.noul}` : ""}${a?.text ? ` ${a.text}` : ""}`.trim())
+      .join("\n");
+  }
   const chat = resp.choices?.[0]?.message;
   if (chat) return chat.content ?? chat.reasoning_content ?? "";
   if (typeof resp.output_text === "string") return resp.output_text;
