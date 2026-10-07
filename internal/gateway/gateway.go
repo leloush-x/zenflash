@@ -344,6 +344,17 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 		// only address /v1/chat/completions or /v1/responses — for example a
 		// gateway whose OpenAI platform pins every request to Responses.
 		if route.Protocol == wire.SystemOne {
+			// A message-shaped body can never satisfy a decision endpoint:
+			// fail fast with directions instead of relaying it into a
+			// cryptic upstream 400. Decision-shaped payloads still relay
+			// verbatim for clients pinned to message endpoints.
+			_, hasMessages := payload["messages"]
+			_, hasInput := payload["input"]
+			_, hasState := payload["state"]
+			if (hasMessages || hasInput) && !hasState {
+				wire.WriteError(w, external, http.StatusBadRequest, fmt.Sprintf("model %s uses the SystemOne decision protocol; POST a decision payload to /v1/systemone instead of a message request", model), "invalid_request_error", "")
+				return
+			}
 			g.forwardSystemOne(w, r, body, payload, model, route)
 			return
 		}
