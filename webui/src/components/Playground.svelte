@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, post, ms, num, replyText, replyMeta } from "../lib";
+  import { api, post, num, replyText, replyMeta } from "../lib";
   import PageHeading from "./PageHeading.svelte";
 
   let data = $state<any>(null);
@@ -18,9 +18,8 @@
   async function load() {
     try {
       data = await api("/api/debug/models");
-      catalog = await api("/api/catalog").catch(() => null);
-      const list = (data?.models ?? []).filter((m: any) => usable(m) && !m.route_error);
-      const first = list.find((m: any) => m.anonymous_eligibility?.allowed) ?? list[0];
+      catalog = await api("/api/catalog?all=1").catch(() => null);
+      const first = models.find((m: any) => m.provider === "zen" || !String(m.model).includes("/")) ?? models[0];
       if (!model && first) model = first.model;
     } catch {}
   }
@@ -28,8 +27,8 @@
   onMount(load);
 
   const usable = (m: any) => m.anonymous_eligibility?.allowed || m.available_zen || m.available_go || m.available_codex || m.available_antigravity;
-  const models = $derived((data?.models ?? []).filter((m: any) => usable(m) && !m.route_error));
-  const providerName = (id: string) => id.startsWith("opencode/") ? "OpenCode" : id.startsWith("cline/") ? "Cline" : id.startsWith("codex/") ? "Codex" : id.startsWith("antigravity/") ? "Antigravity" : "auto";
+  // SystemOne models have their own endpoint; the lab speaks chat, responses, anthropic.
+  const models = $derived((data?.models ?? []).filter((m: any) => usable(m) && !m.route_error && m.native_protocol !== "systemone"));
   const keys = $derived(data?.keys ?? { zen: [], go: [], codex: [], antigravity: [] });
   const catById = $derived(new Map<string, any>((catalog?.data ?? []).map((m: any) => [m.id, m])));
   const selectedCat = $derived(catById.get(model));
@@ -64,57 +63,55 @@
   }
 </script>
 
-<PageHeading section="PLAYGROUND" title="API lab" description="Build a request, choose a model, and inspect the gateway response." icon="playground" />
+<PageHeading section="PLAYGROUND" title="API lab" description="Pick a model, type a prompt, run it." icon="playground" />
 
 <section class="panel fade-up p-3 sm:p-4">
-  <div class="eyebrow">request builder · /api/debug/inference</div>
-
-  <div class="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
-    <div class="flex flex-wrap items-center gap-2">
-      <select bind:value={protocol} class="w-auto" aria-label="protocol">
+  <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-2 sm:flex-row">
+      <select class="min-w-0 grow font-mono text-[13px]" bind:value={model} aria-label="model">
+        {#each models as m (m.model)}
+          <option value={m.model}>{m.model} · {m.native_protocol}</option>
+        {/each}
+      </select>
+      <select bind:value={protocol} class="w-auto shrink-0" aria-label="protocol">
         <option value="chat">chat</option>
         <option value="responses">responses</option>
         <option value="anthropic">anthropic</option>
       </select>
-      <select bind:value={keyMode} class="w-auto" aria-label="key mode">
-        <option value="auto">auto key</option>
-        <option value="selected">select key</option>
-      </select>
-      {#if keyMode === "selected"}
-        <select bind:value={keyTier} class="w-auto" aria-label="tier"><option value="zen">zen</option><option value="go">go</option><option value="codex">codex</option><option value="antigravity">antigravity</option></select>
-        <select bind:value={keyId} class="w-auto" aria-label="key">
-          {#each keyOptions as k (k.id)}<option value={k.id}>{k.display}</option>{/each}
-        </select>
-      {/if}
-      <select bind:value={effort} class="w-auto" title="reasoning effort" aria-label="effort">
-        <option value="">effort: default</option>
-        {#each ["minimal", "low", "medium", "high", "xhigh", "max"] as lv (lv)}<option value={lv}>{lv}</option>{/each}
-      </select>
-    </div>
-
-    <div class="flex flex-wrap items-center gap-2 lg:ml-auto">
-      <select class="min-w-0 grow sm:min-w-56 lg:grow-0 lg:min-w-64" bind:value={model} aria-label="model">
-        {#each models as m (m.model)}
-          <option value={m.model}>{providerName(m.model)} · {m.model.replace(/^(opencode|cline|codex|antigravity)\//, "")} · {m.native_protocol}</option>
-        {/each}
-      </select>
-      <button onclick={run} disabled={busy || !model} class="btn-primary grow px-6 sm:grow-0">
+      <button onclick={run} disabled={busy || !model} class="btn-primary shrink-0 px-6">
         {busy ? "running…" : "run"}
       </button>
     </div>
-  </div>
 
-  {#if selectedCat}
-    <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-[color:var(--color-faint)]">
-      <span class="pill">{selectedCat.provider ?? "–"}</span>
-      <span class="pill">ctx <b class="mono ml-1">{num(selectedCat.context_window)}</b></span>
-      <span class="pill">out <b class="mono ml-1">{num(selectedCat.max_output)}</b></span>
-      {#if selectedCat.metadata?.reasoning}<span class="pill good">reasoning</span>{/if}
-      {#each selectedCat.metadata?.reasoning_efforts ?? [] as lv (lv)}
-        <span class="mono rounded-full border border-[color:var(--color-edge)] px-2 py-0.5 text-[10px]">{lv}</span>
-      {/each}
-    </div>
-  {/if}
+    {#if selectedCat}
+      <div class="flex flex-wrap items-center gap-1.5 text-[11px] text-[color:var(--color-faint)]">
+        <span class="pill good">{selectedCat.provider ?? "–"}</span>
+        <span class="pill">ctx <b class="mono ml-1">{num(selectedCat.context_window)}</b></span>
+        <span class="pill">out <b class="mono ml-1">{num(selectedCat.max_output)}</b></span>
+        {#if selectedCat.metadata?.reasoning}<span class="pill">reasoning</span>{/if}
+      </div>
+    {/if}
+
+    <details>
+      <summary class="cursor-pointer text-[12px] text-[color:var(--color-faint)]">advanced: key + effort</summary>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <select bind:value={keyMode} class="w-auto" aria-label="key mode">
+          <option value="auto">auto key</option>
+          <option value="selected">select key</option>
+        </select>
+        {#if keyMode === "selected"}
+          <select bind:value={keyTier} class="w-auto" aria-label="tier"><option value="zen">zen</option><option value="go">go</option><option value="codex">codex</option><option value="antigravity">antigravity</option></select>
+          <select bind:value={keyId} class="w-auto" aria-label="key">
+            {#each keyOptions as k (k.id)}<option value={k.id}>{k.display}</option>{/each}
+          </select>
+        {/if}
+        <select bind:value={effort} class="w-auto" title="reasoning effort" aria-label="effort">
+          <option value="">effort: default</option>
+          {#each selectedCat?.metadata?.reasoning_efforts?.length ? selectedCat.metadata.reasoning_efforts.map((v: any) => String(v).replace(/"/g, "")) : ["minimal", "low", "medium", "high", "xhigh", "max"] as lv (lv)}<option value={lv}>{lv}</option>{/each}
+        </select>
+      </div>
+    </details>
+  </div>
 
   <p class="mt-2 text-[11px] text-[color:var(--color-faint)]">
     single attempt via the gateway (12/min per IP), no client rotation — use <code>/v1/*</code> directly for streaming.
