@@ -12,6 +12,7 @@ import (
 
 	"zenflash-llm/internal/config"
 	modelcatalog "zenflash-llm/internal/models"
+	"zenflash-llm/internal/opencode"
 	"zenflash-llm/internal/protocol"
 	"zenflash-llm/internal/store"
 	"zenflash-llm/internal/telemetry"
@@ -369,7 +370,7 @@ func (m *RuntimeManager) DebugModels() ([]modelcatalog.RouteDiagnostic, modelcat
 		}
 		if hasZen && hasGo {
 			for _, tier := range []config.Tier{config.TierZen, config.TierGo} {
-				alias := modelcatalog.AliasID(tier, model)
+				alias := opencode.AliasID(tier, model)
 				result = append(result, m.DebugRoute(alias, ""))
 			}
 		}

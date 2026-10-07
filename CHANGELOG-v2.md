@@ -62,6 +62,10 @@
 - New `internal/opencode` (`doc.go`, `opencode.go`): `AnonymousKey`, client identity (`x-opencode-client: cli`), session correlation headers, `Credentials()` key normalization. Same shape as the cline/antigravity/codex modules.
 - Pure moves, no behavior change: `anonymousZenKey` const, the upstream session-header block, and client-identity literals relocated from gateway/models/cline with identical values. Proof: `gofmt -l` clean, `go vet` clean on opencode/gateway/models/cline.
 
+## [16] opencode owns Zen+Go
+- `internal/opencode` now centralizes both OpenCode tiers: `Tiers()`/`IsOpenCodeTier`, the single prefix-to-tier table, `AliasID`, and `ProviderLabel`. Cline is untouched as its own provider.
+- Pure moves with identical output: label logic, alias strings, and routing prefixes relocated from gateway/models. Proof: `gofmt -l` clean, `go vet` clean on opencode/models/gateway/cline.
+
 ## Rollback
 - Per-step revert: `git log --oneline v2`, then `git revert <sha>` for the step.
 - Full rollback: `git checkout main` (v2 never merged to main; no force-push).

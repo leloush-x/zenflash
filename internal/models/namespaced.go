@@ -4,25 +4,16 @@ import (
 	"strings"
 
 	"zenflash-llm/internal/config"
+	"zenflash-llm/internal/opencode"
 )
 
 // Tier prefixes for explicit routing. Bare IDs keep today's prefer-order
 // behavior; prefixed IDs pin one tier. opencode/ == zen, cline/ == go.
 func SplitTierPrefix(id string) (raw string, tier config.Tier, ok bool) {
 	id = strings.TrimSpace(id)
-	for _, p := range []struct {
-		prefix string
-		tier   config.Tier
-	}{
-		{"opencode/", config.TierZen},
-		{"zen/", config.TierZen},
-		{"cline/", config.TierGo},
-		{"go/", config.TierGo},
-		{"codex/", config.TierCodex},
-		{"antigravity/", config.TierAntigravity},
-	} {
-		if strings.HasPrefix(id, p.prefix) && len(id) > len(p.prefix) {
-			return strings.TrimSpace(id[len(p.prefix):]), p.tier, true
+	for _, p := range opencode.Prefixes() {
+		if strings.HasPrefix(id, p.Prefix) && len(id) > len(p.Prefix) {
+			return strings.TrimSpace(id[len(p.Prefix):]), p.Tier, true
 		}
 	}
 	return id, "", false
@@ -98,20 +89,4 @@ func (c *Catalog) RoutePinned(raw string, tier config.Tier, hasZenKeys, hasGoKey
 		}
 	}
 	return c.RouteForTierWithAntigravity(raw, tier, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys)
-}
-
-// AliasID formats a namespaced alias: opencode/ for zen, cline/ for go.
-func AliasID(tier config.Tier, raw string) string {
-	switch tier {
-	case config.TierZen:
-		return "opencode/" + raw
-	case config.TierGo:
-		return "cline/" + raw
-	case config.TierCodex:
-		return "codex/" + raw
-	case config.TierAntigravity:
-		return "antigravity/" + raw
-	default:
-		return raw
-	}
 }

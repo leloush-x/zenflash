@@ -3,13 +3,13 @@ package gateway
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"zenflash-llm/internal/buildinfo"
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/httpx"
 	modelcatalog "zenflash-llm/internal/models"
+	"zenflash-llm/internal/opencode"
 )
 
 type healthResponse struct {
@@ -198,13 +198,7 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 			"id": model, "object": "model", "created": now, "owned_by": "opencode",
 			"metadata": mdMap,
 		}
-		provider := string(route.Tier)
-		if provider == string(config.TierZen) {
-			provider = "zen"
-		} else if provider == string(config.TierGo) && strings.Contains(g.cfg.Upstream.Go, "3457") {
-			provider = "cline"
-		}
-		entry["provider"] = provider
+		entry["provider"] = opencode.ProviderLabel(route.Tier, g.cfg.Upstream.Go)
 		entry["route_protocol"] = route.Protocol
 		if md.ReasoningEfforts != nil {
 			entry["reasoning_efforts"] = md.ReasoningEfforts
@@ -278,7 +272,7 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 					amdMap["structured_output"] = true
 				}
 				alias := map[string]any{
-					"id": modelcatalog.AliasID(aliasTier, model), "object": "model", "created": now, "owned_by": "opencode",
+					"id": opencode.AliasID(aliasTier, model), "object": "model", "created": now, "owned_by": "opencode",
 					"metadata": amdMap,
 				}
 				if aliasTier == config.TierZen {
