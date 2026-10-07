@@ -103,12 +103,6 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	codexService, err := codex.New(*configPath + ".codex.enc")
-	if err != nil {
-		slog.Error("failed to initialize Codex account store", "error", err)
-		os.Exit(1)
-	}
-	codexService.Start(ctx, 10*time.Minute)
 	level := new(slog.LevelVar)
 	telemetry.SetLogLevel(level, cfg.Logging.Level)
 	hub := telemetry.NewLogHub(cfg.Logging.RingSize)
@@ -121,6 +115,9 @@ func main() {
 		logger.Error("invalid environment", "error", err)
 		os.Exit(1)
 	}
+	// Open the durable store BEFORE the Codex service loads: SyncFiles must
+	// restore wiped files from Postgres first, or New would create an empty
+	// file that later syncs back over the backup and wipes linked logins.
 	var durable *store.Store
 	if env.DatabaseURL != "" {
 		ds, err := store.Open(ctx, env.DatabaseURL, logger)
@@ -138,6 +135,13 @@ func main() {
 			durable.StartFileSync(ctx, *configPath)
 		}
 	}
+	codex.SetServiceStore(durable)
+	codexService, err := codex.New(*configPath + ".codex.enc")
+	if err != nil {
+		slog.Error("failed to initialize Codex account store", "error", err)
+		os.Exit(1)
+	}
+	codexService.Start(ctx, 10*time.Minute)
 	clineURL := ""
 	if *clinePort != 0 {
 		clineURL = fmt.Sprintf("http://%s:%d", *clineHost, *clinePort)

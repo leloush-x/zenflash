@@ -151,7 +151,8 @@ func New(path string) (*Service, error) {
 	}
 	_ = os.Chmod(keyPath, 0600)
 	s := &Service{path: path, key: key, pending: map[string]login{}, client: &http.Client{Timeout: 10 * time.Minute}}
-	if err := s.load(); err != nil {
+	existed, err := s.load()
+	if err != nil {
 		return nil, err
 	}
 	if s.state.HostID == "" {
@@ -160,14 +161,19 @@ func New(path string) (*Service, error) {
 			return nil, err
 		}
 		s.state.HostID = "urn:uuid:" + fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
-		if err := s.saveLocked(); err != nil {
-			return nil, err
+		// Never create an empty store file on a fresh host: a later
+		// Postgres file-sync must be able to restore the wiped accounts.
+		// The file is written on the first real login or refresh instead.
+		if existed || len(s.state.Accounts) > 0 {
+			if err := s.saveLocked(); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return s, nil
 }
 
-func (s *Service) load() error {
+func (s *Service) load() (bool, error) {
 	b, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.restoreServiceAccounts()
@@ -175,30 +181,31 @@ func (s *Service) load() error {
 			// Persist the Postgres-restored state immediately so a restart
 			// without DATABASE_URL still keeps the linked accounts.
 			if serr := s.saveLocked(); serr != nil {
-				return serr
+				return false, serr
 			}
+			return true, nil
 		}
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return true, err
 	}
 	block, err := aes.NewCipher(s.key)
 	if err != nil {
-		return err
+		return true, err
 	}
 	g, err := cipher.NewGCM(block)
 	if err != nil {
-		return err
+		return true, err
 	}
 	if len(b) < g.NonceSize() {
-		return errors.New("invalid encrypted Codex store")
+		return true, errors.New("invalid encrypted Codex store")
 	}
 	plain, err := g.Open(nil, b[:g.NonceSize()], b[g.NonceSize():], nil)
 	if err != nil {
-		return fmt.Errorf("decrypt Codex store: %w", err)
+		return true, fmt.Errorf("decrypt Codex store: %w", err)
 	}
-	return json.Unmarshal(plain, &s.state)
+	return true, json.Unmarshal(plain, &s.state)
 }
 func (s *Service) saveLocked() error {
 	plain, err := json.Marshal(s.state)
