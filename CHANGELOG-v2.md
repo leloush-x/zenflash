@@ -26,6 +26,7 @@
 - `002_catalog`: `model_catalog(slot PK, payload JSONB)`.
 - `003_oauth_sessions`: `oauth_tokens(provider, account_id PK, payload JSONB)`, `webui_sessions(token_hash PK, payload JSONB, expires_at)` + expires index.
 - `004_stats`: `request_stats_daily(day PK, requests, tokens)`, `request_events(id bigserial PK, ts, model, tier, success, duration_ms)` + ts index.
+- `005_model_flags`: `model_flags(model_id PK, deprecated, updated_at)` for additive admin model kill-switches.
 - Pooling: `pgxpool` with `DefaultQueryExecMode=SimpleProtocol` (no prepared statements/session state, PgBouncer transaction-mode safe). No `SET/LISTEN/session locks`. Connect retries with backoff ~30s (`config.DBConnectRetryBudget`) for autosuspend. Unsupported URL params reported, never weaken TLS.
 - Importer: one-time idempotent `ImportOnce` from `config.json` (seeds hashed keys + config snapshot), `*.models.catalog.json`, `*.models.dev.json`; skips present slots, sets `v2.imported` marker. No file deletion, no data loss.
 - Login home (`internal/store/oauth.go`, `codex.SetStore`, `antigravity.SetStore`, admin session mirror): Codex/Antigravity login tokens and dashboard sessions are written to `oauth_tokens`/`webui_sessions` on every save and restored from Postgres when files are missing; logout deletes the DB row so sessions cannot resurrect. Files remain as fast local cache. Request behavior unchanged.
@@ -34,13 +35,25 @@
 - Auth: one logical key compatible (list preserved for compat); seeded from today's file key on first boot; stored as SHA256 hash + display suffix (UI shows masked only). Keys cached in memory, refreshed every 60s (`config.AuthKeyTTL`); DB errors keep serving old cache. Requests never wait on DB; stats writes async buffered (1024, drop-on-full, 5s batch), never fail requests.
 - Test: `scripts/test-throwaway-schema.sh` (throwaway schema, double-apply idempotency). CI without `DATABASE_URL` skips DB and builds as before.
 
+## Model catalog controls (2026-10-07)
+- New additive admin routes: `GET /api/flags` and CSRF-protected `PUT /api/flags`. The write waits for Postgres, then updates the in-memory set immediately; `/v1/models` and inference checks only use that memory cache.
+- `GET /v1/models` adds `"deprecated": true` to disabled raw IDs and their aliases, stably places them at the bottom, and skips them before optional working probes.
+- Every gateway inference ingress, the Playground debug ingress, and service-backed Codex ingress reject a disabled model with a protocol-shaped `model_deprecated` error. The Codex model-list wrapper also keeps disabled service models in the list and at its bottom.
+- Models UI: OpenCode/Cline/Antigravity/Codex filters, collapsible source sections, compact display IDs, per-model off switch, and a compact collapsed Deprecated card with restore switches.
+- Playground UI: the same source filter, deprecated visibility toggle, grouped selector, and per-selected-model enable/disable control. Exact model IDs are still sent to the gateway.
+- With no `DATABASE_URL`, `/api/flags` reports `persisted:false` and `/v1/models` has no admin-deprecated entries; existing routing and auth remain unchanged.
+
 ## Behavior diff
 - Intended fix (authorized 2026-10-06): colliding raw IDs now list `opencode/<id>` + `cline/<id>` aliases alongside the bare ID; prefixed IDs pin tiers on all inference routes (`zen/`, `go/`, `codex/`, `antigravity/` aliases included). Bare IDs, routes, formats, errors, auth unchanged.
 - Additive `?working=1` on `GET /v1/models` (authorized 2026-10-07): live-probes each entry, returns only 2xx answers; default listing, shape, and auth unchanged.
-- Otherwise none. Routes, request/response/streaming formats, error shapes, auth header handling, env/flag names, Docker/CI build preserved. Routes, request/response/streaming formats, error shapes, auth header handling, env/flag names, Docker/CI build all preserved. With `DATABASE_URL` empty, code paths fall back to file/memory exactly (nil store). With DB set, responses identical; only durability changes.
+- Authorized admin switch (2026-10-07): only explicitly disabled raw model IDs gain `"deprecated": true`, bottom placement, and the protocol-shaped `model_deprecated` rejection. With no disabled IDs, behavior is none.
+- Otherwise none. Routes, request/response/streaming formats, error shapes, auth header handling, env/flag names, Docker/CI build preserved. With `DATABASE_URL` empty, code paths fall back to file/memory exactly (nil store). With DB set, responses identical; only durability changes.
 
 ## Decisions
 - Postgres optional (not required) to keep Docker/CI building and DB-down serving.
+- One raw model key controls every alias and every public/debug ingress; prefix handling is normalized at the storage boundary.
+- Admin-disabled models remain visible for discoverability, but active views sort them to the bottom and group them into one compact Deprecated card.
+- Source display mapping uses configured provider output: Zen/Go OpenCode routes group under OpenCode, an explicitly labeled embedded Cline route stays Cline, and Antigravity/Codex remain separate. No model IDs are mixed between source filters.
 - SHA256 (not Argon2) for API keys: fast per-request hash compare + constant-time fallback; webui password stays Argon2id.
 - Preserve multi-key list for compat despite "ONE key" wording; single seed covers the common case.
 - File remains import source + fallback to guarantee no data loss; DB is mirror, not destructive replace.
@@ -51,12 +64,13 @@
 - Dead-code candidates not removed for lack of proof: compat aliases, legacy admin paths, single-use helpers. `staticcheck`/`deadcode` not run (network); `go vet` + `grep` only.
 - Remaining magic literals (model IDs, retry strings, log keys) not yet centralized; centralizing all risks churn. Env is fully centralized; other literals documented here.
 - `HTTP_PROXY/HTTPS_PROXY` via `http.ProxyFromEnvironment` (implicit env) kept; moving through config would change transport behavior.
-- Web UI needed no changes (API shapes unchanged); every page not click-tested, only `vite build` via existing dist (no rebuild in this env).
+- Dead-code and config centralization limits from earlier phases remain as listed in Uncertain.
+- `go test ./...` retains the pre-existing stale fixture failure: `internal/gateway` expects Codex User-Agent `codex-cli/0.91.0`, while the current frozen constant is `codex-cli/0.155.0`. This task did not change either value.
 
 ## WebUI sync
 - New additive `GET /api/storage` (auth required): `{enabled, mode, reachable, keys_cached, slots, last_sync}`. No secrets. Existing admin routes unchanged.
 - Settings gains a Storage tab (mode, keys cached, slots, last sync + provider-pin note); Models shows the catalog `provider` pill so `opencode/`/`cline/` pins are visible. No redesign.
-- `webui/dist` rebuild is pending in this environment (vite transform exceeds the execution window; `svelte/compiler` validates both changed components cleanly). Rebuild with `cd webui && npm ci && npm run build` and commit `webui/dist`.
+- Latest source and generated `webui/dist` bundle pass `npm run check` with 0 errors/warnings and `npm run build`.
 
 ## [14] opencode module
 - New `internal/opencode` (`doc.go`, `opencode.go`): `AnonymousKey`, client identity (`x-opencode-client: cli`), session correlation headers, `Credentials()` key normalization. Same shape as the cline/antigravity/codex modules.

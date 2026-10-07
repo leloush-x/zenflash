@@ -392,6 +392,9 @@ curl -c cookies.txt -X POST http://127.0.0.1:8080/api/auth/login \
 | `GET /api/monitor` | usage and resource stats |
 | `GET /api/debug/models` | model routing diagnostics |
 | `POST /api/debug/inference` | Playground single call |
+| `GET /api/catalog` | public `/v1/models` catalog replay |
+| `GET /api/flags` | persisted admin model switches |
+| `PUT /api/flags` | enable/disable one raw model ID |
 | `GET /api/logs` | recent logs |
 | `GET /api/logs/stream` | SSE log stream |
 | `GET /api/events` | SSE live dashboard snapshot |
@@ -517,3 +520,13 @@ that answer `2xx`. It is slower (one short reply per model, 8 at a time,
 30s cap each), opt-in, and changes nothing about the default listing or the
 response shape. Probes run under a diagnostic context, so they never cool
 keys, burn metrics, or reshape traffic.
+
+Admin model switches (`GET`/`PUT /api/flags`) persist raw IDs in
+`model_flags` when `DATABASE_URL` is set. A disabled model stays listed at
+the bottom with `"deprecated": true`, appears in the collapsed
+Deprecated card, and returns the same protocol-shaped `model_deprecated`
+error on every inference route until restored. Alias forms such as
+`opencode/<id>` and `cline/<id>` share the same raw-ID switch. Models and
+Playground also group their short display names by OpenCode, Cline,
+Antigravity, or Codex source; their exact API IDs remain the selectable
+request values.
