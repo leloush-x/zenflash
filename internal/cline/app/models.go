@@ -84,10 +84,10 @@ func mergePublicModels(ids []string) int {
 			continue
 		}
 		if cached, ok := modelsCache[id]; ok {
-			if cached.Source == "public" && isPublicFreeModel(id) {
+			if isPublicFreeModel(id) {
 				cached.Source = "free"
+				cached.Cost = "free"
 			}
-			cached.Cost = "free"
 			cached.Status = ModelActive
 			cached.SyncedAt = time.Now()
 			continue
@@ -100,13 +100,13 @@ func mergePublicModels(ids []string) int {
 			ID:             id,
 			Source:         "public",
 			Provider:       provider,
-			Cost:           "free",
 			Status:         ModelActive,
 			RequiresStream: indexByte(id, ':') < 0,
 			SyncedAt:       time.Now(),
 		}
 		if isPublicFreeModel(id) {
 			m.Source = "free"
+			m.Cost = "free"
 		}
 		modelsCache[id] = m
 		added++
@@ -126,27 +126,19 @@ func sortedModelSlice(in []*ModelInfo) []*ModelInfo {
 	return in
 }
 
-func getAllModels() []*ModelInfo {
+func getFreeModels() []*ModelInfo {
 	initModelsCache()
 	modelsMu.Lock()
 	defer modelsMu.Unlock()
 	out := make([]*ModelInfo, 0, len(modelsCache))
 	for _, m := range modelsCache {
+		if m.Cost != "free" {
+			continue
+		}
 		cp := *m
 		out = append(out, &cp)
 	}
 	return sortedModelSlice(out)
-}
-
-func getFreeModels() []*ModelInfo {
-	all := getAllModels()
-	out := all[:0]
-	for _, m := range all {
-		if m.Cost == "free" {
-			out = append(out, m)
-		}
-	}
-	return out
 }
 
 type recommendedFreeModel struct {
@@ -361,7 +353,7 @@ func syncModelsOnce() {
 	if added, err := syncPublicModels(); err != nil {
 		log.Printf("  model sync: public feed failed (%v)", err)
 	} else if added > 0 {
-		log.Printf("  model sync: %d new free models from public feed", added)
+		log.Printf("  model sync: %d new models from public feed", added)
 	} else {
 		log.Printf("  model sync: %d free models up to date", len(getFreeModels()))
 	}
@@ -409,7 +401,7 @@ func normalizeRequestModel(id string) string {
 
 func apiModelList() []map[string]any {
 	out := make([]map[string]any, 0, len(modelsCache))
-	for _, m := range getAllModels() {
+	for _, m := range getFreeModels() {
 		out = append(out, map[string]any{
 			"id":             m.ID,
 			"object":         "model",
@@ -451,7 +443,7 @@ func startModelsRefresher() {
 // behavior. The gateway uses it to advertise the Cline tier separately from
 // OpenCode Go.
 func ClineModelIDs() []string {
-	models := getAllModels()
+	models := getFreeModels()
 	out := make([]string, 0, len(models))
 	for _, m := range models {
 		if m != nil && m.ID != "" {
@@ -465,7 +457,7 @@ func ClineModelIDs() []string {
 // with display metadata. Used to enrich the gateway Cline tier without
 // changing pool behavior.
 func ClineModelDetails() []ModelInfo {
-	models := getAllModels()
+	models := getFreeModels()
 	out := make([]ModelInfo, 0, len(models))
 	for _, m := range models {
 		if m == nil || m.ID == "" {
