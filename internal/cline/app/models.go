@@ -69,10 +69,11 @@ func initModelsCache() {
 	modelsCache = make(map[string]*ModelInfo)
 }
 
-// mergePublicModels folds every id from the public list into the cache.
-// Free-ness stays a dynamic naming rule (isPublicFreeModel): free ids get
-// Cost "free", the rest keep Cost "" (the public list carries no pricing).
-// Returns the number of newly added ids.
+// mergePublicModels folds every id from the public live list into the
+// cache, all listed as free. Source keeps the origin signal: "free" for the
+// endpoint's own :free/-free//free convention, "public" for the rest, and
+// the per-account recommended feed upgrades entries to "free" with display
+// metadata. Returns the number of newly added ids.
 func mergePublicModels(ids []string) int {
 	modelsMu.Lock()
 	defer modelsMu.Unlock()
@@ -82,12 +83,11 @@ func mergePublicModels(ids []string) int {
 		if id == "" {
 			continue
 		}
-		free := isPublicFreeModel(id)
 		if cached, ok := modelsCache[id]; ok {
-			if free {
+			if cached.Source == "public" && isPublicFreeModel(id) {
 				cached.Source = "free"
-				cached.Cost = "free"
 			}
+			cached.Cost = "free"
 			cached.Status = ModelActive
 			cached.SyncedAt = time.Now()
 			continue
@@ -100,13 +100,13 @@ func mergePublicModels(ids []string) int {
 			ID:             id,
 			Source:         "public",
 			Provider:       provider,
+			Cost:           "free",
 			Status:         ModelActive,
 			RequiresStream: indexByte(id, ':') < 0,
 			SyncedAt:       time.Now(),
 		}
-		if free {
+		if isPublicFreeModel(id) {
 			m.Source = "free"
-			m.Cost = "free"
 		}
 		modelsCache[id] = m
 		added++
@@ -377,10 +377,15 @@ func getDefaultModel() string {
 			return defaultModel
 		}
 	}
-	// Prefer a free model as the automatic default; fall back to any known
-	// id only when no free model has synced yet. Never invent a hardcoded id.
+	// Prefer a convention-marked free model as the automatic default, then
+	// any recommended entry, then any known id. Never invent a hardcoded id.
 	for _, m := range modelsCache {
-		if m.Status == ModelActive && m.Cost == "free" {
+		if m.Status == ModelActive && m.Source == "free" && isPublicFreeModel(m.ID) {
+			return m.ID
+		}
+	}
+	for _, m := range modelsCache {
+		if m.Status == ModelActive && m.Source == "free" {
 			return m.ID
 		}
 	}
