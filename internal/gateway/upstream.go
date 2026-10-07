@@ -214,7 +214,7 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 	}
 
 	keyTiers := route.KeyTiers
-	if !route.Anonymous && len(keyTiers) == 0 && (route.Tier == config.TierZen || route.Tier == config.TierGo || route.Tier == config.TierCodex || route.Tier == config.TierAntigravity) {
+	if !route.Anonymous && len(keyTiers) == 0 && (route.Tier == config.TierZen || route.Tier == config.TierGo || route.Tier == config.TierCline || route.Tier == config.TierCodex || route.Tier == config.TierAntigravity) {
 		keyTiers = []config.Tier{route.Tier}
 	}
 	for _, tier := range keyTiers {
@@ -554,7 +554,7 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 	nodes := g.zenNodes
 	baseURL := g.cfg.Upstream.Zen
 	switch override.Tier {
-	case config.TierGo:
+	case config.TierGo, config.TierCline:
 		nodes = g.goNodes
 		baseURL = g.cfg.Upstream.Go
 	case config.TierCodex:
@@ -637,7 +637,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 	nodes := g.zenNodes
 	baseURL := g.cfg.Upstream.Zen
 	switch route.Tier {
-	case config.TierGo:
+	case config.TierGo, config.TierCline:
 		nodes = g.goNodes
 		baseURL = g.cfg.Upstream.Go
 	case config.TierCodex:

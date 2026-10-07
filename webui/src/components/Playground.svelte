@@ -189,6 +189,7 @@
         <div class="selected-info">
           <span class="source-pill">{sourceLabel(selected.source)}</span>
           <strong title={selected.id}>{selected.label}</strong>
+          {#if selected.display_name ?? selected.metadata?.display_name}<span class="dim">{selected.display_name ?? selected.metadata?.display_name}</span>{/if}
           <span class="dim">ctx <b class="mono">{num(selected.context_window ?? selected.metadata?.context_window)}</b></span>
           <span class="dim">out <b class="mono">{num(selected.max_output ?? selected.metadata?.max_output)}</b></span>
           {#if selected._deprecated}<span class="pill warn">deprecated</span>{/if}
@@ -216,7 +217,7 @@
           <option value="selected">select key</option>
         </select>
         {#if keyMode === "selected"}
-          <select bind:value={keyTier} class="w-auto" aria-label="tier"><option value="zen">opencode</option><option value="go">opencode go</option><option value="codex">codex</option><option value="antigravity">antigravity</option></select>
+          <select bind:value={keyTier} class="w-auto" aria-label="tier"><option value="zen">opencode · zen</option><option value="go">opencode · go</option><option value="cline">cline</option><option value="codex">codex</option><option value="antigravity">antigravity</option></select>
           <select bind:value={keyId} class="w-auto" aria-label="key">
             {#each keyOptions as k (k.id)}<option value={k.id}>{k.display}</option>{/each}
           </select>

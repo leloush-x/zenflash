@@ -166,8 +166,8 @@ func Normalize(path string, cfg Config) (Config, error) {
 	if err := resolveProxyFiles(path, &cfg); err != nil {
 		return Config{}, err
 	}
-	if cfg.Prefer != TierZen && cfg.Prefer != TierGo && cfg.Prefer != TierCodex && cfg.Prefer != TierAntigravity {
-		return Config{}, errors.New("prefer must be \"zen\", \"go\", \"codex\", or \"antigravity\"")
+	if cfg.Prefer != TierZen && cfg.Prefer != TierGo && cfg.Prefer != TierCline && cfg.Prefer != TierCodex && cfg.Prefer != TierAntigravity {
+		return Config{}, errors.New("prefer must be \"zen\", \"go\", \"cline\", \"codex\", or \"antigravity\"")
 	}
 	if cfg.Listen == "" {
 		return Config{}, errors.New("listen must not be empty")

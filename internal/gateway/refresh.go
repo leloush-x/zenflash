@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"zenflash-llm/internal/antigravity"
+	"zenflash-llm/internal/cline/app"
 	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	modelcatalog "zenflash-llm/internal/models"
@@ -152,13 +153,13 @@ func (g *Gateway) applyProxyHealthResult(result proxyHealthResult, source string
 }
 
 func (g *Gateway) refreshOnce(ctx context.Context) {
-	var zen, goModels, codexModels, antigravityModels []string
+	var zen, goModels, clineModels, codexModels, antigravityModels []string
 	var capabilities modelcatalog.Capabilities
 	var capabilitiesErr error
 	var wg sync.WaitGroup
 	wg.Add(5)
 	go func() { defer wg.Done(); zen = g.refreshZen(ctx) }()
-	go func() { defer wg.Done(); goModels = g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes) }()
+	go func() { defer wg.Done(); goModels, clineModels = g.refreshGoAndCline(ctx) }()
 	go func() { defer wg.Done(); codexModels = g.refreshCodexModels(ctx) }()
 	go func() { defer wg.Done(); antigravityModels = g.refreshAntigravityModels(ctx) }()
 	go func() {
@@ -175,7 +176,7 @@ func (g *Gateway) refreshOnce(ctx context.Context) {
 		g.logger.Warn("OpenCode capability catalog refresh failed", "component", "models", "event", "capability_refresh_failed", "error", capabilitiesErr)
 	}
 	if capabilities.Protocols == nil {
-		capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
+		capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCline: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 	}
 	if goModels != nil {
 		if capabilities.Protocols[config.TierGo] == nil {
@@ -184,6 +185,16 @@ func (g *Gateway) refreshOnce(ctx context.Context) {
 		for _, model := range goModels {
 			if _, ok := capabilities.Protocols[config.TierGo][model]; !ok {
 				capabilities.Protocols[config.TierGo][model] = wire.Chat
+			}
+		}
+	}
+	if clineModels != nil {
+		if capabilities.Protocols[config.TierCline] == nil {
+			capabilities.Protocols[config.TierCline] = map[string]wire.Protocol{}
+		}
+		for _, model := range clineModels {
+			if _, ok := capabilities.Protocols[config.TierCline][model]; !ok {
+				capabilities.Protocols[config.TierCline][model] = wire.Chat
 			}
 		}
 	}
@@ -199,7 +210,7 @@ func (g *Gateway) refreshOnce(ctx context.Context) {
 	}
 	if codexModels != nil {
 		if capabilities.Protocols == nil {
-			capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
+			capabilities.Protocols = map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCline: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 		}
 		if capabilities.Protocols[config.TierCodex] == nil {
 			capabilities.Protocols[config.TierCodex] = map[string]wire.Protocol{}
@@ -210,8 +221,36 @@ func (g *Gateway) refreshOnce(ctx context.Context) {
 			}
 		}
 	}
-	if zen != nil || goModels != nil || codexModels != nil || antigravityModels != nil {
-		g.catalog.ReplaceWithCapabilities(zen, goModels, codexModels, antigravityModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
+	if capabilities.Metadata == nil {
+		capabilities.Metadata = map[config.Tier]map[string]modelcatalog.Metadata{}
+	}
+	if capabilities.Metadata[config.TierCline] == nil {
+		capabilities.Metadata[config.TierCline] = map[string]modelcatalog.Metadata{}
+	}
+	for _, m := range app.ClineModelDetails() {
+		if m.ID == "" {
+			continue
+		}
+		md := capabilities.Metadata[config.TierCline][m.ID]
+		if md.DisplayName == "" {
+			md.DisplayName = m.Name
+		}
+		if md.Description == "" {
+			md.Description = m.Description
+		}
+		if md.Provider == "" {
+			md.Provider = m.Provider
+		}
+		if md.SourceTier == "" {
+			md.SourceTier = string(config.TierCline)
+		}
+		if len(md.Tags) == 0 && len(m.Tags) > 0 {
+			md.Tags = append([]string(nil), m.Tags...)
+		}
+		capabilities.Metadata[config.TierCline][m.ID] = md
+	}
+	if zen != nil || goModels != nil || clineModels != nil || codexModels != nil || antigravityModels != nil {
+		g.catalog.ReplaceWithCline(zen, goModels, clineModels, codexModels, antigravityModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
 		if ctx.Err() == nil {
 			if err := g.catalog.SaveCache(); err != nil {
 				g.logger.Warn("model catalog cache write failed", "component", "models", "event", "catalog_cache_write_failed", "error", err)
@@ -302,6 +341,43 @@ func (g *Gateway) refreshAnonymousTier(ctx context.Context, base string) []strin
 	}
 	g.logger.Warn("anonymous model catalog refresh failed", "component", "models", "event", "anonymous_refresh_failed", "upstream", config.RedactURL(base))
 	return nil
+}
+
+// refreshGoAndCline splits the Go upstream listing from the embedded Cline
+// pool listing. When the Go upstream is the embedded Cline proxy, its /v1/models
+// mixes OpenCode Zen-free models with Cline account models; only IDs present in
+// the Cline pool stay on the Cline tier, the rest stay on Go. A standalone Go
+// endpoint keeps everything on Go and leaves Cline untouched (nil = preserve).
+func (g *Gateway) refreshGoAndCline(ctx context.Context) ([]string, []string) {
+	listed := g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes)
+	if listed == nil {
+		return nil, nil
+	}
+	if !opencode.IsClineUpstream(g.cfg.Upstream.Go) {
+		return listed, nil
+	}
+	if !g.hasGoKeys() {
+		return nil, nil
+	}
+	clineIDs := map[string]bool{}
+	for _, id := range app.ClineModelIDs() {
+		clineIDs[id] = true
+	}
+	var goIDs, clineOut []string
+	for _, id := range listed {
+		if clineIDs[id] {
+			clineOut = append(clineOut, id)
+		} else {
+			goIDs = append(goIDs, id)
+		}
+	}
+	if goIDs == nil {
+		goIDs = []string{}
+	}
+	if clineOut == nil {
+		clineOut = []string{}
+	}
+	return goIDs, clineOut
 }
 
 func (g *Gateway) refreshTier(ctx context.Context, base string, nodes *nodePool) []string {

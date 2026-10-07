@@ -28,6 +28,7 @@ type healthModels struct {
 	Exposed           int        `json:"exposed"`
 	Zen               int        `json:"zen"`
 	Go                int        `json:"go"`
+	Cline             int        `json:"cline,omitempty"`
 	LastRefresh       *time.Time `json:"last_refresh,omitempty"`
 	StaleAfterSeconds int        `json:"stale_after_seconds"`
 	CacheSource       string     `json:"cache_source,omitempty"`
@@ -104,6 +105,7 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, _ *http.Request) {
 			Exposed:           models.Exposed,
 			Zen:               models.Zen,
 			Go:                models.Go,
+			Cline:             models.Cline,
 			LastRefresh:       lastRefresh,
 			StaleAfterSeconds: int(staleAfter / time.Second),
 			CacheSource:       models.CacheSource,
@@ -120,7 +122,8 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (g *Gateway) availableModels() ([]modelcatalog.Route, modelcatalog.CatalogSnapshot) {
-	return g.catalog.AvailableModelsWithAntigravity(g.zenNodes.Len() > 0, g.goNodes.Len() > 0 && g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+	hasCline := g.goNodes.Len() > 0 && g.hasGoKeys()
+	return g.catalog.AvailableModelsWithCline(g.zenNodes.Len() > 0, g.goNodes.Len() > 0 && g.hasGoKeys() && !opencode.IsClineUpstream(g.cfg.Upstream.Go), hasCline, g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 }
 
 func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -172,6 +175,21 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 		// the tier that will serve the request (anonymous ⇒ Zen).
 		md := g.catalog.MetadataForTier(model, route.Tier)
 		mdMap := map[string]any{}
+		if md.DisplayName != "" {
+			mdMap["display_name"] = md.DisplayName
+		}
+		if md.Description != "" {
+			mdMap["description"] = md.Description
+		}
+		if md.Provider != "" {
+			mdMap["provider"] = md.Provider
+		}
+		if md.SourceTier != "" {
+			mdMap["source_tier"] = md.SourceTier
+		}
+		if md.Tags != nil {
+			mdMap["tags"] = md.Tags
+		}
 		if md.ContextWindow > 0 {
 			mdMap["context_window"] = md.ContextWindow
 		}
@@ -208,6 +226,12 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 		}
 		entry["provider"] = opencode.ProviderLabel(route.Tier, g.cfg.Upstream.Go)
 		entry["route_protocol"] = route.Protocol
+		if md.DisplayName != "" {
+			entry["display_name"] = md.DisplayName
+		}
+		if md.Description != "" {
+			entry["description"] = md.Description
+		}
 		if md.ReasoningEfforts != nil {
 			entry["reasoning_efforts"] = md.ReasoningEfforts
 		}
@@ -234,30 +258,51 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 			entry["structured_output"] = true
 		}
 		data = append(data, entry)
-		// Collision aliases: the same raw ID advertised on both opencode
-		// (zen) and cline (go) is listed once per tier as opencode/<id> and
-		// cline/<id> so clients can pin a provider. The bare ID is kept for
-		// backward compatibility and follows prefer-order routing.
+		// Pin aliases: a raw ID advertised on several sources lists one
+		// alias per usable source (opencode/<id>, cline/<id>, go/<id>) so
+		// clients can pin a provider. The bare ID is kept for backward
+		// compatibility and follows prefer-order routing. A Cline login
+		// only unlocks cline/<id>, never go/<id>.
 		tiers := g.catalog.TiersForModel(model)
-		hasZen, hasGoCatalog := false, false
+		hasZen, hasGoCatalog, hasClineCatalog := false, false, false
 		for _, tr := range tiers {
 			if tr == config.TierZen {
 				hasZen = true
 			} else if tr == config.TierGo {
 				hasGoCatalog = true
+			} else if tr == config.TierCline {
+				hasClineCatalog = true
 			}
 		}
-		if hasZen && hasGoCatalog {
-			aliasTiers := make([]config.Tier, 0, 2)
-			if g.zenNodes.Len() > 0 || g.cfg.Anonymous {
+		if (hasZen && hasGoCatalog) || (hasZen && hasClineCatalog) || (hasGoCatalog && hasClineCatalog) {
+			aliasTiers := make([]config.Tier, 0, 3)
+			if hasZen && (g.zenNodes.Len() > 0 || g.cfg.Anonymous) {
 				aliasTiers = append(aliasTiers, config.TierZen)
 			}
-			if g.goNodes.Len() > 0 && g.hasGoKeys() {
+			if hasGoCatalog && g.goNodes.Len() > 0 && g.hasGoKeys() && !opencode.IsClineUpstream(g.cfg.Upstream.Go) {
 				aliasTiers = append(aliasTiers, config.TierGo)
+			}
+			if hasClineCatalog && g.goNodes.Len() > 0 && g.hasGoKeys() {
+				aliasTiers = append(aliasTiers, config.TierCline)
 			}
 			for _, aliasTier := range aliasTiers {
 				amd := g.catalog.MetadataForTier(model, aliasTier)
 				amdMap := map[string]any{}
+				if amd.DisplayName != "" {
+					amdMap["display_name"] = amd.DisplayName
+				}
+				if amd.Description != "" {
+					amdMap["description"] = amd.Description
+				}
+				if amd.Provider != "" {
+					amdMap["provider"] = amd.Provider
+				}
+				if amd.SourceTier != "" {
+					amdMap["source_tier"] = amd.SourceTier
+				}
+				if amd.Tags != nil {
+					amdMap["tags"] = amd.Tags
+				}
 				if amd.ContextWindow > 0 {
 					amdMap["context_window"] = amd.ContextWindow
 				}
@@ -286,11 +331,7 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 				if deprecated {
 					alias["deprecated"] = true
 				}
-				if aliasTier == config.TierZen {
-					alias["provider"] = "opencode"
-				} else {
-					alias["provider"] = "cline"
-				}
+				alias["provider"] = opencode.ProviderLabel(aliasTier, g.cfg.Upstream.Go)
 				alias["route_protocol"] = route.ProtocolFor(aliasTier)
 				if amd.ReasoningEfforts != nil {
 					alias["reasoning_efforts"] = amd.ReasoningEfforts

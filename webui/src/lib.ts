@@ -71,13 +71,14 @@ export const rawModelID = (id: string) => {
   return value;
 };
 
-/** Display source groups without leaking internal Zen/Go tier names. */
+/** Display source groups: OpenCode (zen/go), Cline pool, Antigravity, Codex. */
 export const modelSource = (m: any) => {
   const provider = String(m?.provider ?? "").toLowerCase();
   const tier = String(m?.tier ?? "").toLowerCase();
-  // An explicit embedded Cline label wins over its internal go-tier marker.
-  if (provider === "cline" || tier === "cline") return "cline";
-  if (["zen", "opencode", "go"].includes(provider) || ["zen", "go"].includes(tier)) return "opencode";
+  const id = String(m?.id ?? m?.model ?? "");
+  if (provider === "cline" || tier === "cline" || id.startsWith("cline/")) return "cline";
+  if (provider === "opencode" || id.startsWith("opencode/") || id.startsWith("go/")) return "opencode";
+  if (["zen", "go"].includes(provider) || ["zen", "go"].includes(tier)) return "opencode";
   if (provider === "antigravity" || tier === "antigravity") return "antigravity";
   if (provider === "codex" || tier === "codex") return "codex";
   return provider || tier || "other";
@@ -156,7 +157,7 @@ export function replyMeta(out: any): { label: string; value: string }[] {
   const items: { label: string; value: string }[] = [];
   if (out.http_status) items.push({ label: "status", value: String(out.http_status) });
   if (out.duration_ms !== undefined) items.push({ label: "time", value: ms(out.duration_ms) });
-  if (out.route?.tier) items.push({ label: "source", value: out.route.tier === "zen" ? "opencode" : out.route.tier === "go" ? "cline" : out.route.tier === "codex" ? "codex" : out.route.tier === "antigravity" ? "antigravity" : out.route.tier });
+  if (out.route?.tier) items.push({ label: "source", value: out.route.tier === "zen" || out.route.tier === "go" ? "opencode" : out.route.tier === "cline" ? "cline" : out.route.tier === "codex" ? "codex" : out.route.tier === "antigravity" ? "antigravity" : out.route.tier });
   if (out.route?.channel) items.push({ label: "channel", value: out.route.channel });
   if (out.key_test) items.push({ label: "key", value: out.key_test });
   const u = out.response?.usage;

@@ -360,16 +360,21 @@ func (m *RuntimeManager) DebugModels() ([]modelcatalog.RouteDiagnostic, modelcat
 	gateway := runtime.gateway
 	models := gateway.catalog.List()
 	result := make([]modelcatalog.RouteDiagnostic, 0, len(models))
+	hasGo := gateway.hasGoKeys() && !opencode.IsClineUpstream(gateway.cfg.Upstream.Go)
 	for _, model := range models {
-		result = append(result, gateway.catalog.DiagnosticWithAntigravity(model, "", len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys(), gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous))
+		result = append(result, gateway.catalog.DiagnosticWithCline(model, "", len(gateway.cfg.ZenKeys) > 0, hasGo, gateway.hasGoKeys(), gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous))
 		tiers := gateway.catalog.TiersForModel(model)
-		hasZen, hasGo := false, false
+		hasZen, hasGo, hasCline := false, false, false
 		for _, tier := range tiers {
 			hasZen = hasZen || tier == config.TierZen
 			hasGo = hasGo || tier == config.TierGo
-		}
-		if hasZen && hasGo {
-			for _, tier := range []config.Tier{config.TierZen, config.TierGo} {
+			hasCline = hasCline || tier == config.TierCline
+			}
+		if (hasZen && hasGo) || (hasZen && hasCline) || (hasGo && hasCline) {
+			for _, tier := range []config.Tier{config.TierZen, config.TierGo, config.TierCline} {
+				if (tier == config.TierZen && !hasZen) || (tier == config.TierGo && !hasGo) || (tier == config.TierCline && !hasCline) {
+					continue
+				}
 				alias := opencode.AliasID(tier, model)
 				result = append(result, m.DebugRoute(alias, ""))
 			}
@@ -385,12 +390,13 @@ func (m *RuntimeManager) DebugRoute(model string, requested protocol.Protocol) m
 		return modelcatalog.RouteDiagnostic{Model: model, RequestedProtocol: requested, RouteError: "gateway runtime is unavailable"}
 	}
 	gateway := runtime.gateway
+	hasGoDiag := gateway.hasGoKeys() && !opencode.IsClineUpstream(gateway.cfg.Upstream.Go)
 	if raw, tier, ok := modelcatalog.SplitTierPrefix(model); ok {
-		hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys(), gateway.codexPool().Len() > 0
+		hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, hasGoDiag, gateway.codexPool().Len() > 0
 		hasAntigravity := gateway.antigravityPool().Len() > 0
-		diag := gateway.catalog.DiagnosticWithAntigravity(raw, requested, hasZen, hasGo, hasCodex, hasAntigravity, gateway.cfg.Anonymous)
+		diag := gateway.catalog.DiagnosticWithCline(raw, requested, hasZen, hasGo, gateway.hasGoKeys(), hasCodex, hasAntigravity, gateway.cfg.Anonymous)
 		diag.Model = model
-		if route, err := gateway.catalog.RoutePinned(raw, tier, hasZen, hasGo, hasCodex, hasAntigravity, gateway.cfg.Anonymous); err == nil {
+		if route, err := gateway.catalog.RoutePinnedWithCline(raw, tier, hasZen, hasGo, gateway.hasGoKeys(), hasCodex, hasAntigravity, gateway.cfg.Anonymous); err == nil {
 			diag.Tier, diag.Anonymous = route.Tier, route.Anonymous
 			diag.KeyTiers = append([]config.Tier(nil), route.KeyTiers...)
 			diag.NativeProtocol, diag.NativeProtocols = route.Protocol, route.Protocols
@@ -400,7 +406,7 @@ func (m *RuntimeManager) DebugRoute(model string, requested protocol.Protocol) m
 		}
 		return diag
 	}
-	return gateway.catalog.DiagnosticWithAntigravity(model, requested, len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys(), gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous)
+	return gateway.catalog.DiagnosticWithCline(model, requested, len(gateway.cfg.ZenKeys) > 0, hasGoDiag, gateway.hasGoKeys(), gateway.codexPool().Len() > 0, gateway.antigravityPool().Len() > 0, gateway.cfg.Anonymous)
 }
 
 // DebugKeyView is the operator-facing view of one configured upstream key. It
@@ -459,10 +465,10 @@ func (m *RuntimeManager) DebugRouteForTier(model string, tier config.Tier) (mode
 		return modelcatalog.RouteDiagnostic{Model: model, RouteError: "gateway runtime is unavailable"}, fmt.Errorf("gateway runtime is unavailable")
 	}
 	gateway := runtime.gateway
-	hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys(), gateway.codexPool().Len() > 0
+	hasZen, hasGo, hasCodex := len(gateway.cfg.ZenKeys) > 0, gateway.hasGoKeys() && !opencode.IsClineUpstream(gateway.cfg.Upstream.Go), gateway.codexPool().Len() > 0
 	hasAntigravity := gateway.antigravityPool().Len() > 0
-	diagnostic := gateway.catalog.DiagnosticWithAntigravity(model, "", hasZen, hasGo, hasCodex, hasAntigravity, false)
-	route, err := gateway.catalog.RouteForTierWithAntigravity(model, tier, hasZen, hasGo, hasCodex, hasAntigravity)
+	diagnostic := gateway.catalog.DiagnosticWithCline(model, "", hasZen, hasGo, gateway.hasGoKeys(), hasCodex, hasAntigravity, false)
+	route, err := gateway.catalog.RouteForTierWithCline(model, tier, hasZen, hasGo, gateway.hasGoKeys(), hasCodex, hasAntigravity)
 	if err != nil {
 		diagnostic.RouteError = err.Error()
 		return diagnostic, err

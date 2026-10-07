@@ -162,7 +162,7 @@
             <article class="model-row" class:busy={flagBusy === rawModelID(m.id)}>
               <span class="source-chip">{group.label}</span>
               <div class="model-copy">
-                <strong title={m.id}>{m.label}</strong>
+                <strong title={(m.display_name ?? m.metadata?.display_name ?? m.id) + "\n" + m.id}>{m.display_name ?? m.metadata?.display_name ?? m.label}</strong>
                 <span>{m.route_protocol ?? "auto"}{m.context_window ? ` · ${Math.round(m.context_window / 1000)}k` : ""}{m.max_output ? ` out ${Math.round(m.max_output / 1000)}k` : ""}</span>
               </div>
               <div class="model-tags">
@@ -194,7 +194,7 @@
             <article class="deprecated-row" class:busy={flagBusy === rawModelID(m.id)}>
               <span class="source-chip warn">{sourceLabel(m.source)}</span>
               <div class="model-copy">
-                <strong title={m.id}>{m.label}</strong>
+                <strong title={(m.display_name ?? m.metadata?.display_name ?? m.id) + "\n" + m.id}>{m.display_name ?? m.metadata?.display_name ?? m.label}</strong>
                 <span>{m.route_protocol ?? "auto"} · disabled</span>
               </div>
               <button class="switch on" disabled={flagBusy === rawModelID(m.id)} title={`Restore ${m.id}`} onclick={() => setDeprecated(m.id, false)}>

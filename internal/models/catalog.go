@@ -39,6 +39,7 @@ type RouteDiagnostic struct {
 	ProtocolSource       string                        `json:"protocol_source"`
 	AvailableZen         bool                          `json:"available_zen"`
 	AvailableGo          bool                          `json:"available_go"`
+	AvailableCline       bool                          `json:"available_cline,omitempty"`
 	AvailableCodex       bool                          `json:"available_codex"`
 	AvailableAntigravity bool                          `json:"available_antigravity,omitempty"`
 	Tier                 config.Tier                   `json:"tier,omitempty"`
@@ -55,6 +56,7 @@ type Catalog struct {
 	mu                sync.RWMutex
 	zen               map[string]bool
 	goModels          map[string]bool
+	clineModels       map[string]bool
 	codexModels       map[string]bool
 	antigravityModels map[string]bool
 	protocols         map[string]wire.Protocol
@@ -75,6 +77,7 @@ type Catalog struct {
 type CatalogSnapshot struct {
 	Zen         int       `json:"zen"`
 	Go          int       `json:"go"`
+	Cline       int       `json:"cline,omitempty"`
 	Codex       int       `json:"codex"`
 	Antigravity int       `json:"antigravity,omitempty"`
 	Total       int       `json:"total"`
@@ -90,7 +93,7 @@ func NewCatalog(prefer config.Tier, overrides map[string]string) *Catalog {
 		protocols[model] = wire.Protocol(protocol)
 	}
 	return &Catalog{
-		zen: map[string]bool{}, goModels: map[string]bool{}, codexModels: map[string]bool{}, antigravityModels: map[string]bool{}, protocols: protocols,
+		zen: map[string]bool{}, goModels: map[string]bool{}, clineModels: map[string]bool{}, codexModels: map[string]bool{}, antigravityModels: map[string]bool{}, protocols: protocols,
 		nativeProtocols: allTierProtocolMaps(),
 		unsupported:     allTierBoolMaps(), prefer: prefer,
 		cacheSource: "none",
@@ -134,19 +137,19 @@ func (c *Catalog) SetRefreshInterval(interval time.Duration) {
 }
 
 func allTiers() []config.Tier {
-	return []config.Tier{config.TierZen, config.TierGo, config.TierCodex, config.TierAntigravity}
+	return []config.Tier{config.TierZen, config.TierGo, config.TierCline, config.TierCodex, config.TierAntigravity}
 }
 
 func allTierProtocolMaps() map[config.Tier]map[string]wire.Protocol {
-	return map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
+	return map[config.Tier]map[string]wire.Protocol{config.TierZen: {}, config.TierGo: {}, config.TierCline: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 }
 
 func allTierBoolMaps() map[config.Tier]map[string]bool {
-	return map[config.Tier]map[string]bool{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
+	return map[config.Tier]map[string]bool{config.TierZen: {}, config.TierGo: {}, config.TierCline: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 }
 
 func allTierMetaMaps() map[config.Tier]map[string]Metadata {
-	return map[config.Tier]map[string]Metadata{config.TierZen: {}, config.TierGo: {}, config.TierCodex: {}, config.TierAntigravity: {}}
+	return map[config.Tier]map[string]Metadata{config.TierZen: {}, config.TierGo: {}, config.TierCline: {}, config.TierCodex: {}, config.TierAntigravity: {}}
 }
 
 func (c *Catalog) Replace(zen, goModels, codexModels []string) {
@@ -157,7 +160,17 @@ func (c *Catalog) ReplaceWithAntigravity(zen, goModels, codexModels, antigravity
 	c.ReplaceWithCapabilities(zen, goModels, codexModels, antigravityModels, nil, nil, nil)
 }
 
+// ReplaceWithCapabilities installs a four-source snapshot (OpenCode Zen/Go,
+// Codex, Antigravity) and preserves the embedded Cline pool, so partial
+// refreshes never wipe a healthy Cline tier.
 func (c *Catalog) ReplaceWithCapabilities(zen, goModels, codexModels, antigravityModels []string, native map[config.Tier]map[string]wire.Protocol, unsupported map[config.Tier]map[string]bool, metadata map[config.Tier]map[string]Metadata) {
+	c.ReplaceWithCline(zen, goModels, nil, codexModels, antigravityModels, native, unsupported, metadata)
+}
+
+// ReplaceWithCline installs the full five-source snapshot: OpenCode Zen/Go,
+// the embedded Cline account pool, Codex, and Antigravity. A nil slice leaves
+// that source untouched so partial refreshes never wipe a healthy tier.
+func (c *Catalog) ReplaceWithCline(zen, goModels, clineModels, codexModels, antigravityModels []string, native map[config.Tier]map[string]wire.Protocol, unsupported map[config.Tier]map[string]bool, metadata map[config.Tier]map[string]Metadata) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if zen != nil {
@@ -165,6 +178,9 @@ func (c *Catalog) ReplaceWithCapabilities(zen, goModels, codexModels, antigravit
 	}
 	if goModels != nil {
 		c.goModels = toSet(goModels)
+	}
+	if clineModels != nil {
+		c.clineModels = toSet(clineModels)
 	}
 	if codexModels != nil {
 		c.codexModels = toSet(codexModels)
@@ -201,6 +217,7 @@ func (c *Catalog) CopyState(source *Catalog) {
 	source.mu.RLock()
 	zen := make(map[string]bool, len(source.zen))
 	goModels := make(map[string]bool, len(source.goModels))
+	clineModels := make(map[string]bool, len(source.clineModels))
 	codexModels := make(map[string]bool, len(source.codexModels))
 	antigravityModels := make(map[string]bool, len(source.antigravityModels))
 	for model, available := range source.zen {
@@ -208,6 +225,9 @@ func (c *Catalog) CopyState(source *Catalog) {
 	}
 	for model, available := range source.goModels {
 		goModels[model] = available
+	}
+	for model, available := range source.clineModels {
+		clineModels[model] = available
 	}
 	for model, available := range source.codexModels {
 		codexModels[model] = available
@@ -231,7 +251,7 @@ func (c *Catalog) CopyState(source *Catalog) {
 	stale := source.stale
 	source.mu.RUnlock()
 	c.mu.Lock()
-	c.zen, c.goModels, c.codexModels, c.antigravityModels, c.nativeProtocols, c.unsupported, c.updatedAt = zen, goModels, codexModels, antigravityModels, native, unsupported, updatedAt
+	c.zen, c.goModels, c.clineModels, c.codexModels, c.antigravityModels, c.nativeProtocols, c.unsupported, c.updatedAt = zen, goModels, clineModels, codexModels, antigravityModels, native, unsupported, updatedAt
 	c.modelMeta = meta
 	c.cacheSource, c.stale = cacheSource, stale
 	c.mu.Unlock()
@@ -242,19 +262,26 @@ func (c *Catalog) Route(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAn
 }
 
 func (c *Catalog) RouteWithAntigravity(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) (Route, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.routeLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
+	return c.RouteWithCline(model, hasZenKeys, hasGoKeys, false, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
 }
 
-func (c *Catalog) routeLocked(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) (Route, error) {
-	keyTiers := c.keyTierOrderLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys)
+// RouteWithCline is the five-source route entry point. The embedded Cline
+// pool is independent from the OpenCode Go tier: a Cline login never
+// advertises OpenCode Go models and vice versa.
+func (c *Catalog) RouteWithCline(model string, hasZenKeys, hasGoKeys, hasClineKeys bool, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) (Route, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.routeLocked(model, hasZenKeys, hasGoKeys, hasClineKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
+}
+
+func (c *Catalog) routeLocked(model string, hasZenKeys, hasGoKeys, hasClineKeys bool, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) (Route, error) {
+	keyTiers := c.keyTierOrderWithClineLocked(model, hasZenKeys, hasGoKeys, hasClineKeys, hasCodexKeys, hasAntigravityKeys)
 	// OpenCode's public credential is a Zen-only lane. Every free model starts
 	// there, even if the current catalog only advertises it on Go: an upstream
 	// rejection will move the request into the authenticated fallback plan.
 	decision := c.anonymousDecision(model)
 	if hasAnonymous && decision.Allowed && (c.protocols[model] != "" || !c.unsupported[config.TierZen][model]) &&
-		(len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0 || c.zen[model] || c.goModels[model]) {
+		(len(c.zen) == 0 && len(c.goModels) == 0 && len(c.clineModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0 || c.zen[model] || c.goModels[model]) {
 		protocols := c.protocolsForLocked(model, keyTiers, true)
 		return Route{ID: model, Tier: config.TierZen, Protocol: protocols[config.TierZen], Protocols: protocols, Anonymous: true, KeyTiers: keyTiers}, nil
 	}
@@ -262,7 +289,7 @@ func (c *Catalog) routeLocked(model string, hasZenKeys, hasGoKeys, hasCodexKeys,
 		protocols := c.protocolsForLocked(model, keyTiers, false)
 		return Route{ID: model, Tier: keyTiers[0], Protocol: protocols[keyTiers[0]], Protocols: protocols, KeyTiers: keyTiers}, nil
 	}
-	return Route{}, fmt.Errorf("model %q is not available in the configured Zen, Go, Codex, or Antigravity pools", model)
+	return Route{}, fmt.Errorf("model %q is not available in the configured Zen, Go, Cline, Codex, or Antigravity pools", model)
 }
 
 func (r Route) ProtocolFor(tier config.Tier) wire.Protocol {
@@ -309,13 +336,24 @@ func (c *Catalog) protocolForLocked(model string, tier config.Tier) wire.Protoco
 // successful catalog refresh, configured key pools remain usable so temporary
 // discovery failures do not take the gateway offline.
 func (c *Catalog) keyTierOrderLocked(model string, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys bool) []config.Tier {
-	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
+	return c.keyTierOrderWithClineLocked(model, hasZenKeys, hasGoKeys, false, hasCodexKeys, hasAntigravityKeys)
+}
+
+// keyTierOrderWithClineLocked builds an authenticated route in prefer order.
+// Each tier is included only when it has a key (Cline: an active account) and
+// advertises the model. Before the first successful catalog refresh,
+// configured key pools remain usable so temporary discovery failures do not
+// take the gateway offline.
+func (c *Catalog) keyTierOrderWithClineLocked(model string, hasZenKeys, hasGoKeys, hasClineKeys bool, hasCodexKeys, hasAntigravityKeys bool) []config.Tier {
+	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0 && len(c.clineModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
 	available := func(tier config.Tier) bool {
 		switch tier {
 		case config.TierZen:
 			return hasZenKeys && (catalogPending || c.zen[model]) && c.tierSupportedLocked(model, config.TierZen)
 		case config.TierGo:
 			return hasGoKeys && (catalogPending || c.goModels[model]) && c.tierSupportedLocked(model, config.TierGo)
+		case config.TierCline:
+			return hasClineKeys && (catalogPending || c.clineModels[model]) && c.tierSupportedLocked(model, config.TierCline)
 		case config.TierCodex:
 			return hasCodexKeys && (catalogPending || c.codexModels[model]) && c.tierSupportedLocked(model, config.TierCodex)
 		case config.TierAntigravity:
@@ -327,10 +365,12 @@ func (c *Catalog) keyTierOrderLocked(model string, hasZenKeys, hasGoKeys, hasCod
 	order := allTiers()
 	if c.prefer == config.TierGo {
 		order[0], order[1] = order[1], order[0]
+	} else if c.prefer == config.TierCline {
+		order = []config.Tier{config.TierCline, config.TierZen, config.TierGo, config.TierCodex, config.TierAntigravity}
 	} else if c.prefer == config.TierCodex {
-		order = []config.Tier{config.TierCodex, config.TierZen, config.TierGo, config.TierAntigravity}
+		order = []config.Tier{config.TierCodex, config.TierZen, config.TierGo, config.TierCline, config.TierAntigravity}
 	} else if c.prefer == config.TierAntigravity {
-		order = []config.Tier{config.TierAntigravity, config.TierZen, config.TierGo, config.TierCodex}
+		order = []config.Tier{config.TierAntigravity, config.TierZen, config.TierGo, config.TierCline, config.TierCodex}
 	}
 	result := make([]config.Tier, 0, len(order))
 	for _, tier := range order {
@@ -350,13 +390,22 @@ func (c *Catalog) RouteForTier(model string, tier config.Tier, hasZenKeys, hasGo
 }
 
 func (c *Catalog) RouteForTierWithAntigravity(model string, tier config.Tier, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys bool) (Route, error) {
-	if tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex && tier != config.TierAntigravity {
-		return Route{}, errors.New("selected key tier must be zen, go, codex, or antigravity")
+	return c.RouteForTierWithCline(model, tier, hasZenKeys, hasGoKeys, false, hasCodexKeys, hasAntigravityKeys)
+}
+
+// RouteForTierWithCline pins a diagnostic to one tier, including the
+// embedded Cline pool. It never selects the anonymous lane and never adds a
+// fallback tier.
+func (c *Catalog) RouteForTierWithCline(model string, tier config.Tier, hasZenKeys, hasGoKeys, hasClineKeys bool, hasCodexKeys, hasAntigravityKeys bool) (Route, error) {
+	if tier != config.TierZen && tier != config.TierGo && tier != config.TierCline && tier != config.TierCodex && tier != config.TierAntigravity {
+		return Route{}, errors.New("selected key tier must be zen, go, cline, codex, or antigravity")
 	}
 	hasKeys := hasZenKeys
 	switch tier {
 	case config.TierGo:
 		hasKeys = hasGoKeys
+	case config.TierCline:
+		hasKeys = hasClineKeys
 	case config.TierCodex:
 		hasKeys = hasCodexKeys
 	case config.TierAntigravity:
@@ -367,11 +416,13 @@ func (c *Catalog) RouteForTierWithAntigravity(model string, tier config.Tier, ha
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
+	catalogPending := len(c.zen) == 0 && len(c.goModels) == 0 && len(c.clineModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
 	advertised := c.zen[model]
 	switch tier {
 	case config.TierGo:
 		advertised = c.goModels[model]
+	case config.TierCline:
+		advertised = c.clineModels[model]
 	case config.TierCodex:
 		advertised = c.codexModels[model]
 	case config.TierAntigravity:
@@ -412,24 +463,32 @@ func (c *Catalog) Diagnostic(model string, requested wire.Protocol, hasZenKeys, 
 }
 
 func (c *Catalog) DiagnosticWithAntigravity(model string, requested wire.Protocol, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) RouteDiagnostic {
+	return c.DiagnosticWithCline(model, requested, hasZenKeys, hasGoKeys, false, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
+}
+
+// DiagnosticWithCline reports per-source availability including the separate
+// embedded Cline pool, so the dashboard never merges Cline models into Go.
+func (c *Catalog) DiagnosticWithCline(model string, requested wire.Protocol, hasZenKeys, hasGoKeys, hasClineKeys bool, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) RouteDiagnostic {
 	c.mu.RLock()
 	configured, explicit := c.protocols[model]
-	zen, goModel, codexModel, antigravityModel := c.zen[model], c.goModels[model], c.codexModels[model], c.antigravityModels[model]
+	zen, goModel, clineModel, codexModel, antigravityModel := c.zen[model], c.goModels[model], c.clineModels[model], c.codexModels[model], c.antigravityModels[model]
 	nativeProtocols := map[config.Tier]wire.Protocol{
 		config.TierZen:         c.protocolForLocked(model, config.TierZen),
 		config.TierGo:          c.protocolForLocked(model, config.TierGo),
+		config.TierCline:       c.protocolForLocked(model, config.TierCline),
 		config.TierCodex:       c.protocolForLocked(model, config.TierCodex),
 		config.TierAntigravity: c.protocolForLocked(model, config.TierAntigravity),
 	}
 	_, zenKnown := c.nativeProtocols[config.TierZen][model]
 	_, goKnown := c.nativeProtocols[config.TierGo][model]
+	_, clineKnown := c.nativeProtocols[config.TierCline][model]
 	_, codexKnown := c.nativeProtocols[config.TierCodex][model]
 	_, antigravityKnown := c.nativeProtocols[config.TierAntigravity][model]
 	c.mu.RUnlock()
 	source := "configured"
 	if !explicit {
 		source = "default"
-		if zenKnown || goKnown || codexKnown || antigravityKnown {
+		if zenKnown || goKnown || clineKnown || codexKnown || antigravityKnown {
 			source = "upstream"
 		}
 	}
@@ -440,6 +499,8 @@ func (c *Catalog) DiagnosticWithAntigravity(model string, requested wire.Protoco
 		protocol = nativeProtocols[config.TierZen]
 		if c.prefer == config.TierGo {
 			protocol = nativeProtocols[config.TierGo]
+		} else if c.prefer == config.TierCline {
+			protocol = nativeProtocols[config.TierCline]
 		} else if c.prefer == config.TierCodex {
 			protocol = nativeProtocols[config.TierCodex]
 		} else if c.prefer == config.TierAntigravity {
@@ -448,9 +509,9 @@ func (c *Catalog) DiagnosticWithAntigravity(model string, requested wire.Protoco
 	}
 	diagnostic := RouteDiagnostic{
 		Model: model, RequestedProtocol: requested, NativeProtocol: protocol, NativeProtocols: nativeProtocols, ProtocolSource: source,
-		AvailableZen: zen, AvailableGo: goModel, AvailableCodex: codexModel, AvailableAntigravity: antigravityModel, AnonymousEligibility: c.anonymousDecision(model),
+		AvailableZen: zen, AvailableGo: goModel, AvailableCline: clineModel, AvailableCodex: codexModel, AvailableAntigravity: antigravityModel, AnonymousEligibility: c.anonymousDecision(model),
 	}
-	route, err := c.RouteWithAntigravity(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
+	route, err := c.RouteWithCline(model, hasZenKeys, hasGoKeys, hasClineKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
 	if err != nil {
 		diagnostic.RouteError = err.Error()
 		return diagnostic
@@ -480,11 +541,14 @@ func (c *Catalog) List() []string {
 }
 
 func (c *Catalog) modelIDsLocked() []string {
-	seen := make(map[string]bool, len(c.zen)+len(c.goModels)+len(c.codexModels)+len(c.antigravityModels))
+	seen := make(map[string]bool, len(c.zen)+len(c.goModels)+len(c.clineModels)+len(c.codexModels)+len(c.antigravityModels))
 	for model := range c.zen {
 		seen[model] = true
 	}
 	for model := range c.goModels {
+		seen[model] = true
+	}
+	for model := range c.clineModels {
 		seen[model] = true
 	}
 	for model := range c.codexModels {
@@ -509,6 +573,12 @@ func (c *Catalog) AvailableModels(hasZenKeys, hasGoKeys, hasCodexKeys, hasAnonym
 }
 
 func (c *Catalog) AvailableModelsWithAntigravity(hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) ([]Route, CatalogSnapshot) {
+	return c.AvailableModelsWithCline(hasZenKeys, hasGoKeys, false, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
+}
+
+// AvailableModelsWithCline lists routable models with a separate Cline
+// availability flag, so the embedded account pool never merges into Go.
+func (c *Catalog) AvailableModelsWithCline(hasZenKeys, hasGoKeys, hasClineKeys bool, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) ([]Route, CatalogSnapshot) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	ids := c.modelIDsLocked()
@@ -517,7 +587,7 @@ func (c *Catalog) AvailableModelsWithAntigravity(hasZenKeys, hasGoKeys, hasCodex
 		if !c.supportedLocked(model) {
 			continue
 		}
-		if route, err := c.routeLocked(model, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous); err == nil {
+		if route, err := c.routeLocked(model, hasZenKeys, hasGoKeys, hasClineKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous); err == nil {
 			routes = append(routes, route)
 		}
 	}
@@ -538,7 +608,7 @@ func (c *Catalog) snapshotLocked(ids []string) CatalogSnapshot {
 		stale = stale || time.Since(c.updatedAt) > max(2*c.refreshAfter, time.Minute)
 	}
 	return CatalogSnapshot{
-		Zen: len(c.zen), Go: len(c.goModels), Codex: len(c.codexModels), Antigravity: len(c.antigravityModels), Total: len(ids), Exposed: exposed,
+		Zen: len(c.zen), Go: len(c.goModels), Cline: len(c.clineModels), Codex: len(c.codexModels), Antigravity: len(c.antigravityModels), Total: len(ids), Exposed: exposed,
 		UpdatedAt: c.updatedAt, CacheSource: c.cacheSource, Stale: stale,
 	}
 }
@@ -563,6 +633,10 @@ func (c *Catalog) MetadataForTier(model string, tier config.Tier) Metadata {
 	md.ReasoningEfforts = cloneRawMessages(md.ReasoningEfforts)
 	md.InputModalities = append([]string(nil), md.InputModalities...)
 	md.OutputModalities = append([]string(nil), md.OutputModalities...)
+	md.Tags = append([]string(nil), md.Tags...)
+	if md.SourceTier == "" {
+		md.SourceTier = string(tier)
+	}
 	return md
 }
 
@@ -591,13 +665,16 @@ func (c *Catalog) ValidateReasoningEffort(model string, tier config.Tier, effort
 }
 
 func (c *Catalog) supportedLocked(model string) bool {
-	if len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0 {
+	if len(c.zen) == 0 && len(c.goModels) == 0 && len(c.clineModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0 {
 		return true
 	}
 	if c.zen[model] && c.tierSupportedLocked(model, config.TierZen) {
 		return true
 	}
 	if c.goModels[model] && c.tierSupportedLocked(model, config.TierGo) {
+		return true
+	}
+	if c.clineModels[model] && c.tierSupportedLocked(model, config.TierCline) {
 		return true
 	}
 	if c.codexModels[model] && c.tierSupportedLocked(model, config.TierCodex) {
@@ -629,7 +706,7 @@ func (c *Catalog) tierSupportedLocked(model string, tier config.Tier) bool {
 	}
 	// A pending catalog has no upstream capability snapshot to contradict a
 	// configured key, so retain the pre-refresh compatibility behavior.
-	return len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
+	return len(c.zen) == 0 && len(c.goModels) == 0 && len(c.clineModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
 }
 
 func toSet(items []string) map[string]bool {
@@ -663,6 +740,7 @@ func cloneModelMeta(source map[config.Tier]map[string]Metadata) map[config.Tier]
 			md.ReasoningEfforts = cloneRawMessages(md.ReasoningEfforts)
 			md.InputModalities = append([]string(nil), md.InputModalities...)
 			md.OutputModalities = append([]string(nil), md.OutputModalities...)
+			md.Tags = append([]string(nil), md.Tags...)
 			result[tier][id] = md
 		}
 	}

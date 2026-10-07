@@ -8,7 +8,8 @@ import (
 )
 
 // Tier prefixes for explicit routing. Bare IDs keep today's prefer-order
-// behavior; prefixed IDs pin one tier. opencode/ == zen, cline/ == go.
+// behavior; prefixed IDs pin one tier. opencode/ == zen, cline/ == cline,
+// go/ == go.
 func SplitTierPrefix(id string) (raw string, tier config.Tier, ok bool) {
 	id = strings.TrimSpace(id)
 	for _, p := range opencode.Prefixes() {
@@ -29,6 +30,9 @@ func (c *Catalog) TiersForModel(raw string) []config.Tier {
 	}
 	if c.goModels[raw] {
 		out = append(out, config.TierGo)
+	}
+	if c.clineModels[raw] {
+		out = append(out, config.TierCline)
 	}
 	if c.codexModels[raw] {
 		out = append(out, config.TierCodex)
@@ -53,6 +57,8 @@ func (c *Catalog) SupportedNamespaced(id string) bool {
 		return c.tierSupportedLocked(raw, tier) && (c.zen[raw] || c.pendingLocked())
 	case config.TierGo:
 		return c.tierSupportedLocked(raw, tier) && (c.goModels[raw] || c.pendingLocked())
+	case config.TierCline:
+		return c.tierSupportedLocked(raw, tier) && (c.clineModels[raw] || c.pendingLocked())
 	case config.TierCodex:
 		return c.tierSupportedLocked(raw, tier) && (c.codexModels[raw] || c.pendingLocked())
 	case config.TierAntigravity:
@@ -63,30 +69,38 @@ func (c *Catalog) SupportedNamespaced(id string) bool {
 }
 
 func (c *Catalog) pendingLocked() bool {
-	return len(c.zen) == 0 && len(c.goModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
+	return len(c.zen) == 0 && len(c.goModels) == 0 && len(c.clineModels) == 0 && len(c.codexModels) == 0 && len(c.antigravityModels) == 0
 }
 
 // RoutePinned resolves a tier-prefixed ID to one tier. Authenticated pins use
 // RouteForTier semantics; a zen pin may use the anonymous lane when the model
 // is anonymous-eligible and no zen key exists.
 func (c *Catalog) RoutePinned(raw string, tier config.Tier, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) (Route, error) {
+	return c.RoutePinnedWithCline(raw, tier, hasZenKeys, hasGoKeys, false, hasCodexKeys, hasAntigravityKeys, hasAnonymous)
+}
+
+// RoutePinnedWithCline resolves a tier-prefixed ID with a separate Cline
+// availability flag, so a Cline login never unlocks OpenCode Go models.
+func (c *Catalog) RoutePinnedWithCline(raw string, tier config.Tier, hasZenKeys, hasGoKeys, hasClineKeys bool, hasCodexKeys, hasAntigravityKeys, hasAnonymous bool) (Route, error) {
 	hasKeys := hasZenKeys
 	switch tier {
 	case config.TierGo:
 		hasKeys = hasGoKeys
+	case config.TierCline:
+		hasKeys = hasClineKeys
 	case config.TierCodex:
 		hasKeys = hasCodexKeys
 	case config.TierAntigravity:
 		hasKeys = hasAntigravityKeys
 	}
 	if hasKeys {
-		return c.RouteForTierWithAntigravity(raw, tier, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys)
+		return c.RouteForTierWithCline(raw, tier, hasZenKeys, hasGoKeys, hasClineKeys, hasCodexKeys, hasAntigravityKeys)
 	}
 	if hasAnonymous && tier == config.TierZen {
-		route, err := c.RouteWithAntigravity(raw, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys, true)
+		route, err := c.RouteWithCline(raw, hasZenKeys, hasGoKeys, hasClineKeys, hasCodexKeys, hasAntigravityKeys, true)
 		if err == nil && route.Anonymous {
 			return route, nil
 		}
 	}
-	return c.RouteForTierWithAntigravity(raw, tier, hasZenKeys, hasGoKeys, hasCodexKeys, hasAntigravityKeys)
+	return c.RouteForTierWithCline(raw, tier, hasZenKeys, hasGoKeys, hasClineKeys, hasCodexKeys, hasAntigravityKeys)
 }

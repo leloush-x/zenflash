@@ -22,6 +22,8 @@ const (
 type ModelInfo struct {
 	ID             string      `json:"id"`
 	Name           string      `json:"name,omitempty"`
+	Description    string      `json:"description,omitempty"`
+	Tags           []string    `json:"tags,omitempty"`
 	Source         string      `json:"source"`
 	Provider       string      `json:"provider"`
 	Cost           string      `json:"cost"`
@@ -147,11 +149,19 @@ func syncRecommendedModels() (int, error) {
 			if cached.Name == "" {
 				cached.Name = m.Name
 			}
+			if cached.Description == "" {
+				cached.Description = m.Description
+			}
+			if len(cached.Tags) == 0 && len(m.Tags) > 0 {
+				cached.Tags = append([]string(nil), m.Tags...)
+			}
 			continue
 		}
 		modelsCache[id] = &ModelInfo{
 			ID:             id,
 			Name:           m.Name,
+			Description:    m.Description,
+			Tags:           append([]string(nil), m.Tags...),
 			Source:         "free",
 			Provider:       provider,
 			Cost:           "free",
@@ -271,4 +281,36 @@ func startModelsRefresher() {
 			syncModelsOnce()
 		}
 	}()
+}
+
+// ClineModelIDs returns the sorted IDs currently in the embedded Cline free
+// model cache. Read-only: it never triggers a sync and never changes pool
+// behavior. The gateway uses it to advertise the Cline tier separately from
+// OpenCode Go.
+func ClineModelIDs() []string {
+	models := getFreeModels()
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		if m != nil && m.ID != "" {
+			out = append(out, m.ID)
+		}
+	}
+	return out
+}
+
+// ClineModelDetails returns a read-only snapshot of the embedded Cline pool
+// with display metadata. Used to enrich the gateway Cline tier without
+// changing pool behavior.
+func ClineModelDetails() []ModelInfo {
+	models := getFreeModels()
+	out := make([]ModelInfo, 0, len(models))
+	for _, m := range models {
+		if m == nil || m.ID == "" {
+			continue
+		}
+		cp := *m
+		cp.Tags = append([]string(nil), m.Tags...)
+		out = append(out, cp)
+	}
+	return out
 }

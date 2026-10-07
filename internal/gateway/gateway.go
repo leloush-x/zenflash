@@ -265,13 +265,15 @@ func (g *Gateway) authenticate(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // resolveRoute accepts bare IDs (prefer-order, today's behavior) and
-// tier-prefixed IDs (opencode/x, cline/x, ...) pinned to one tier.
+// tier-prefixed IDs (opencode/x, cline/x, go/x, ...) pinned to one tier.
+// Cline availability (active account) never unlocks OpenCode Go models.
 func (g *Gateway) resolveRoute(model string) (models.Route, error) {
+	hasGo := g.hasGoKeys() && !opencode.IsClineUpstream(g.cfg.Upstream.Go)
 	raw, tier, ok := models.SplitTierPrefix(model)
 	if !ok {
-		return g.catalog.RouteWithAntigravity(model, len(g.cfg.ZenKeys) > 0, g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+		return g.catalog.RouteWithCline(model, len(g.cfg.ZenKeys) > 0, hasGo, g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 	}
-	return g.catalog.RoutePinned(raw, tier, len(g.cfg.ZenKeys) > 0, g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
+	return g.catalog.RoutePinnedWithCline(raw, tier, len(g.cfg.ZenKeys) > 0, hasGo, g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0, g.cfg.Anonymous)
 }
 
 func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
@@ -307,7 +309,7 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 		if override, selected := debugKeyOverrideFrom(r.Context()); selected {
 			// A per-key diagnostic must not silently be served by another key,
 			// another tier or the anonymous lane.
-			route, err = g.catalog.RouteForTierWithAntigravity(model, override.Tier, len(g.cfg.ZenKeys) > 0, g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0)
+			route, err = g.catalog.RouteForTierWithCline(model, override.Tier, len(g.cfg.ZenKeys) > 0, g.hasGoKeys() && !opencode.IsClineUpstream(g.cfg.Upstream.Go), g.hasGoKeys(), g.codexPool().Len() > 0, g.antigravityPool().Len() > 0)
 		}
 		if err != nil {
 			wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", "model")
@@ -605,7 +607,7 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 	tiers := make([]config.Tier, 0, len(route.KeyTiers)+1)
 	seen := make(map[config.Tier]bool, len(route.KeyTiers)+1)
 	addTier := func(tier config.Tier) {
-		if (tier != config.TierZen && tier != config.TierGo && tier != config.TierCodex && tier != config.TierAntigravity) || seen[tier] {
+		if (tier != config.TierZen && tier != config.TierGo && tier != config.TierCline && tier != config.TierCodex && tier != config.TierAntigravity) || seen[tier] {
 			return
 		}
 		seen[tier] = true
@@ -623,7 +625,7 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 		protocol := route.ProtocolFor(tier)
 		baseURL := g.cfg.Upstream.Zen
 		switch tier {
-		case config.TierGo:
+		case config.TierGo, config.TierCline:
 			baseURL = g.cfg.Upstream.Go
 		case config.TierCodex:
 			baseURL = g.codexBase()

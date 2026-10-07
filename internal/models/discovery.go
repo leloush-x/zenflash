@@ -39,6 +39,9 @@ type capabilityProvider struct {
 
 type capabilityModel struct {
 	ID               string                      `json:"id"`
+	Name             string                      `json:"name"`
+	Description      string                      `json:"description"`
+	Tags             []string                    `json:"tags"`
 	Provider         *capabilityModelProvider    `json:"provider"`
 	Limit            *capabilityModelLimit       `json:"limit"`
 	Reasoning        bool                        `json:"reasoning"`
@@ -69,6 +72,11 @@ type capabilityModelLimit struct {
 // windows and feature flags from the catalog instead of guessing. It is
 // purely additive: routing does not depend on any of these fields.
 type Metadata struct {
+	DisplayName      string            `json:"display_name,omitempty"`
+	Description      string            `json:"description,omitempty"`
+	Provider         string            `json:"provider,omitempty"`
+	SourceTier       string            `json:"source_tier,omitempty"`
+	Tags             []string          `json:"tags,omitempty"`
 	ContextWindow    int               `json:"context_window,omitempty"`
 	MaxInput         int               `json:"max_input,omitempty"`
 	MaxOutput        int               `json:"max_output,omitempty"`
@@ -82,6 +90,9 @@ type Metadata struct {
 
 func (m *capabilityModel) metadata() Metadata {
 	md := Metadata{
+		DisplayName:      m.Name,
+		Description:      m.Description,
+		Tags:             append([]string(nil), m.Tags...),
 		Reasoning:        m.Reasoning,
 		ToolCall:         m.ToolCall,
 		StructuredOutput: m.StructuredOutput,
@@ -171,7 +182,10 @@ func FetchCapabilities(ctx context.Context, client *http.Client, endpoint string
 			} else {
 				result.Unsupported[tier][modelID] = true
 			}
-			result.Metadata[tier][modelID] = model.metadata()
+			md := model.metadata()
+			md.Provider = providerID
+			md.SourceTier = string(tier)
+			result.Metadata[tier][modelID] = md
 		}
 	}
 	// The machine catalog is the primary source. The upstream endpoint tables
