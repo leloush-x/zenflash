@@ -966,7 +966,7 @@ func chatToGemini(model, project string, chat map[string]any) (map[string]any, s
 				continue
 			}
 			decls = append(decls, map[string]any{
-				"name": name, "description": fn["description"], "parameters": fn["parameters"],
+				"name": name, "description": fn["description"], "parameters": sanitizeGeminiSchema(fn["parameters"]),
 			})
 		}
 		if len(decls) > 0 {
@@ -993,6 +993,62 @@ func chatToGemini(model, project string, chat map[string]any) (map[string]any, s
 	}
 	envelope := map[string]any{"model": wireModel, "project": project, "request": req}
 	return envelope, wireModel
+}
+
+// sanitizeGeminiSchema strips JSON Schema fields Gemini's function
+// declarations reject (for example "$schema" and "exclusiveMinimum") while
+// preserving the shape clients actually use. Unknown object shapes pass
+// through structurally so tools keep working instead of failing the call.
+func sanitizeGeminiSchema(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		if arr, ok := v.([]any); ok {
+			out := make([]any, 0, len(arr))
+			for _, item := range arr {
+				out = append(out, sanitizeGeminiSchema(item))
+			}
+			return out
+		}
+		return v
+	}
+	// Union keywords collapse to their first viable branch: Gemini has no
+	// anyOf/allOf/oneOf on function parameters, and the first branch carries
+	// the usable type in practice.
+	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
+		if branches, ok := m[key].([]any); ok && len(branches) > 0 {
+			if branch, ok := branches[0].(map[string]any); ok {
+				for bkey, bval := range branch {
+					if _, exists := m[bkey]; !exists {
+						m[bkey] = bval
+					}
+				}
+			}
+		}
+	}
+	out := make(map[string]any, len(m))
+	for key, val := range m {
+		switch key {
+		case "$schema", "$id", "$ref", "$defs", "definitions",
+			"exclusiveMinimum", "exclusiveMaximum",
+			"const", "default", "examples", "example",
+			"readOnly", "writeOnly", "deprecated",
+			"contentMediaType", "contentEncoding",
+			"if", "then", "else", "not",
+			"allOf", "anyOf", "oneOf":
+			continue
+		}
+		out[key] = sanitizeGeminiSchema(val)
+	}
+	// Numeric bounds in draft-4 style ("exclusiveMinimum": true + "minimum")
+	// mean nothing to Gemini; drop the orphaned flag only when a numeric
+	// bound survives alongside it.
+	if _, hasMin := out["minimum"]; hasMin {
+		delete(out, "exclusiveMinimum")
+	}
+	if _, hasMax := out["maximum"]; hasMax {
+		delete(out, "exclusiveMaximum")
+	}
+	return out
 }
 
 // BuildGenerateRequest converts a Chat wire body to a Cloud Code envelope.
