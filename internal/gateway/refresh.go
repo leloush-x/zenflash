@@ -345,9 +345,12 @@ func (g *Gateway) refreshAnonymousTier(ctx context.Context, base string) []strin
 
 // refreshGoAndCline splits the Go upstream listing from the embedded Cline
 // pool listing. When the Go upstream is the embedded Cline proxy, its /v1/models
-// mixes OpenCode Zen-free models with Cline account models; only IDs present in
-// the Cline pool stay on the Cline tier, the rest stay on Go. A standalone Go
-// endpoint keeps everything on Go and leaves Cline untouched (nil = preserve).
+// mixes OpenCode Zen-free models with Cline account models; listed IDs present
+// in the Cline pool stay on the Cline tier, the rest stay on Go. The Cline tier
+// itself is the full free pool (union): pool models the accounts can serve
+// stay advertised even when the Go upstream does not list them (intersecting
+// here silently dropped models like Apodex). A standalone Go endpoint keeps
+// everything on Go and leaves Cline untouched (nil = preserve).
 func (g *Gateway) refreshGoAndCline(ctx context.Context) ([]string, []string) {
 	listed := g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes)
 	if listed == nil {
@@ -363,21 +366,16 @@ func (g *Gateway) refreshGoAndCline(ctx context.Context) ([]string, []string) {
 	for _, id := range app.ClineModelIDs() {
 		clineIDs[id] = true
 	}
-	var goIDs, clineOut []string
+	var goIDs []string
 	for _, id := range listed {
-		if clineIDs[id] {
-			clineOut = append(clineOut, id)
-		} else {
+		if !clineIDs[id] {
 			goIDs = append(goIDs, id)
 		}
 	}
 	if goIDs == nil {
 		goIDs = []string{}
 	}
-	if clineOut == nil {
-		clineOut = []string{}
-	}
-	return goIDs, clineOut
+	return goIDs, app.ClineModelIDs()
 }
 
 func (g *Gateway) refreshTier(ctx context.Context, base string, nodes *nodePool) []string {
