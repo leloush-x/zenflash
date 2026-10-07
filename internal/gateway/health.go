@@ -357,19 +357,33 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 		}
 		data = append(data, entry)
 	}
-	// Deprecated entries stay visible but sink to the bottom so clients and
-	// the dashboard stop surfacing them first. Separate backing arrays keep
-	// the stable active/deprecated partition from overwriting itself.
-	kept := make([]map[string]any, 0, len(data))
-	pinned := make([]map[string]any, 0, len(data))
-	for _, entry := range data {
-		if entry["deprecated"] == true {
-			pinned = append(pinned, entry)
-		} else {
-			kept = append(kept, entry)
+	// Deprecated models stay out of the machine listing entirely: clients
+	// must never auto-pick a disabled model. The dashboard has its own
+	// collapsed Deprecated section, so nothing visible is lost there.
+	// ?deprecated=1 remains as an explicit opt-in for debugging.
+	showDeprecated := r != nil && (r.URL.Query().Get("deprecated") == "1" || r.URL.Query().Get("deprecated") == "true")
+	if !showDeprecated {
+		kept := data[:0]
+		for _, entry := range data {
+			if entry["deprecated"] != true {
+				kept = append(kept, entry)
+			}
 		}
+		data = kept
+	} else {
+		// Explicit deprecated view: sink them to the bottom so active rows
+		// still surface first.
+		kept := make([]map[string]any, 0, len(data))
+		pinned := make([]map[string]any, 0, len(data))
+		for _, entry := range data {
+			if entry["deprecated"] == true {
+				pinned = append(pinned, entry)
+			} else {
+				kept = append(kept, entry)
+			}
+		}
+		data = append(kept, pinned...)
 	}
-	data = append(kept, pinned...)
 	// Working-only view: ?working=1 live-probes each entry through the
 	// production inference path and keeps entries that answer 2xx. Opt-in
 	// and slower (one tiny reply per model); disabled models are removed
