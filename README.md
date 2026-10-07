@@ -480,6 +480,7 @@ MIT.
 - `internal/admin`: management API + embedded UI.
 - `internal/cline`: embedded Cline proxy (`app`), registration (`cline`), helpers (`kit`).
 - `internal/codex`, `internal/antigravity`: OAuth tiers, token stores.
+- `internal/opencode`: Zen/Go surface (anonymous key, client identity, session headers, key normalization).
 - `internal/store`: optional Neon Postgres (migrations, importer, key TTL, async stats).
 - `internal/httpx`, `internal/identity`, `internal/jsonutil`, `internal/telemetry`: shared support.
 - `webui`: dashboard source + embedded dist (rebuild only when UI changes).

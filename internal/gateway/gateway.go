@@ -21,14 +21,13 @@ import (
 	"zenflash-llm/internal/identity"
 	"zenflash-llm/internal/jsonutil"
 	"zenflash-llm/internal/models"
+	"zenflash-llm/internal/opencode"
 	wire "zenflash-llm/internal/protocol"
 	"zenflash-llm/internal/store"
 	"zenflash-llm/internal/telemetry"
 )
 
 const maxRequestBody = 32 << 20
-
-const anonymousZenKey = "public"
 
 type Gateway struct {
 	cfg                 config.Config
@@ -137,11 +136,11 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor, con
 		return nil, err
 	}
 	cooldown := time.Duration(cfg.Performance.FailureCooldownSeconds) * time.Second
-	zenNodes, err := newNodePool(cfg.ZenKeys, transports, cooldown)
+	zenNodes, err := newNodePool(opencode.Credentials(cfg.ZenKeys), transports, cooldown)
 	if err != nil {
 		return nil, fmt.Errorf("zen node pool: %w", err)
 	}
-	goNodes, err := newNodePool(cfg.GoKeys, transports, cooldown)
+	goNodes, err := newNodePool(opencode.Credentials(cfg.GoKeys), transports, cooldown)
 	if err != nil {
 		return nil, fmt.Errorf("go node pool: %w", err)
 	}

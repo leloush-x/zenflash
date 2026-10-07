@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 	"zenflash-llm/internal/cline/kit"
+	"zenflash-llm/internal/opencode"
 )
 
 // ZenModel opencode zen 免费模型定义
@@ -415,7 +416,7 @@ func callZenAPI(params map[string]any, stream bool) (*http.Response, int, error)
 		req.Header.Set("User-Agent", ua)
 		req.Header.Set("x-opencode-session", sess)
 		req.Header.Set("x-opencode-request", user)
-		req.Header.Set("x-opencode-client", "cli")
+		req.Header.Set(opencode.ClientHeader, opencode.ClientValue)
 
 		model, _ := params["model"].(string)
 		if m, ok := resolveZenModel(model); ok {

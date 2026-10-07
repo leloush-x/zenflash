@@ -12,6 +12,7 @@ import (
 
 	"zenflash-llm/internal/config"
 	"zenflash-llm/internal/httpx"
+	"zenflash-llm/internal/opencode"
 	wire "zenflash-llm/internal/protocol"
 )
 
@@ -287,7 +288,7 @@ func FetchModels(ctx context.Context, client *http.Client, baseURL, key string) 
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("User-Agent", httpx.UserAgent())
-	req.Header.Set("x-opencode-client", "cli")
+	req.Header.Set(opencode.ClientHeader, opencode.ClientValue)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err

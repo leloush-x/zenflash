@@ -21,6 +21,7 @@ import (
 	"zenflash-llm/internal/identity"
 	"zenflash-llm/internal/jsonutil"
 	"zenflash-llm/internal/models"
+	"zenflash-llm/internal/opencode"
 	wire "zenflash-llm/internal/protocol"
 	"zenflash-llm/internal/telemetry"
 )
@@ -285,7 +286,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 			httpx.DrainAndClose(lastResponse.Body)
 			lastResponse = nil
 		}
-		req, err := newUpstreamRequest(ctx, g.cfg.Upstream.Zen, route.Protocol, body, ids, anonymousZenKey)
+		req, err := newUpstreamRequest(ctx, g.cfg.Upstream.Zen, route.Protocol, body, ids, opencode.AnonymousKey)
 		if err != nil {
 			return nil, err, attempts
 		}
@@ -881,18 +882,7 @@ func newUpstreamRequest(ctx context.Context, baseURL string, protocol wire.Proto
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("User-Agent", httpx.UserAgent())
-	req.Header.Set("x-opencode-client", "cli")
-	req.Header.Set("x-opencode-session", ids.Session)
-	// OpenCode 1.18.x sends these correlation headers to preserve provider-side
-	// prompt/session affinity. Keep the legacy x-opencode-session header too so
-	// older Zen deployments continue to recognize the request.
-	req.Header.Set("x-session-affinity", ids.Session)
-	req.Header.Set("X-Session-Id", ids.Session)
-	req.Header.Set("x-opencode-request", ids.Request)
-	req.Header.Set("x-opencode-project", ids.Project)
-	if ids.ParentSession != "" {
-		req.Header.Set("x-parent-session-id", ids.ParentSession)
-	}
+	opencode.SetSessionHeaders(req.Header, ids)
 	if protocol == wire.Anthropic {
 		req.Header.Set("x-api-key", key)
 		req.Header.Set("anthropic-version", "2023-06-01")

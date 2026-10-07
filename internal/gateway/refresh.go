@@ -11,6 +11,7 @@ import (
 	"zenflash-llm/internal/codex"
 	"zenflash-llm/internal/config"
 	modelcatalog "zenflash-llm/internal/models"
+	"zenflash-llm/internal/opencode"
 	wire "zenflash-llm/internal/protocol"
 )
 
@@ -289,7 +290,7 @@ func (g *Gateway) refreshAnonymousTier(ctx context.Context, base string) []strin
 			break
 		}
 		refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		models, status, err := modelcatalog.FetchModels(refreshCtx, node.proxy.client, base, anonymousZenKey)
+		models, status, err := modelcatalog.FetchModels(refreshCtx, node.proxy.client, base, opencode.AnonymousKey)
 		g.syncProxyResult(refreshCtx, node.proxy, status, err)
 		cancel()
 		if err == nil {

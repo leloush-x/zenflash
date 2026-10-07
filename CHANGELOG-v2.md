@@ -58,6 +58,10 @@
 - Settings gains a Storage tab (mode, keys cached, slots, last sync + provider-pin note); Models shows the catalog `provider` pill so `opencode/`/`cline/` pins are visible. No redesign.
 - `webui/dist` rebuild is pending in this environment (vite transform exceeds the execution window; `svelte/compiler` validates both changed components cleanly). Rebuild with `cd webui && npm ci && npm run build` and commit `webui/dist`.
 
+## [14] opencode module
+- New `internal/opencode` (`doc.go`, `opencode.go`): `AnonymousKey`, client identity (`x-opencode-client: cli`), session correlation headers, `Credentials()` key normalization. Same shape as the cline/antigravity/codex modules.
+- Pure moves, no behavior change: `anonymousZenKey` const, the upstream session-header block, and client-identity literals relocated from gateway/models/cline with identical values. Proof: `gofmt -l` clean, `go vet` clean on opencode/gateway/models/cline.
+
 ## Rollback
 - Per-step revert: `git log --oneline v2`, then `git revert <sha>` for the step.
 - Full rollback: `git checkout main` (v2 never merged to main; no force-push).
