@@ -1233,12 +1233,77 @@ func WantsStream(chatBody []byte) bool {
 
 // ToStreamResponse wraps a Chat JSON document as a single-event SSE stream
 // so the gateway's Chat SSE forward/transcode path can be reused.
+// ToStreamResponse wraps a Chat JSON document as OpenAI-style SSE deltas so
+// strict OpenAI-compatible clients (Cline CLI included) accumulate content
+// instead of reading an empty reply. A single full document event is not a
+// valid Chat stream shape for those clients.
 func ToStreamResponse(chatJSON []byte) *http.Response {
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, chatJSON); err != nil {
-		compact.Write(chatJSON)
+	var doc struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
+		Created int64  `json:"created"`
+		Choices []struct {
+			Message struct {
+				Content   string `json:"content"`
+				Role      string `json:"role"`
+				ToolCalls []any  `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage map[string]any `json:"usage"`
 	}
-	event := append(append([]byte("data: "), compact.Bytes()...), '\n', '\n')
-	event = append(event, []byte("data: [DONE]\n\n")...)
-	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream; charset=utf-8"}}, Body: io.NopCloser(bytes.NewReader(event))}
+	if err := json.Unmarshal(chatJSON, &doc); err != nil || len(doc.Choices) == 0 {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, chatJSON); err != nil {
+			compact.Write(chatJSON)
+		}
+		event := append(append([]byte("data: "), compact.Bytes()...), '\n', '\n')
+		event = append(event, []byte("data: [DONE]\n\n")...)
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream; charset=utf-8"}}, Body: io.NopCloser(bytes.NewReader(event))}
+	}
+	choice := doc.Choices[0]
+	role := choice.Message.Role
+	if role == "" {
+		role = "assistant"
+	}
+	var buf bytes.Buffer
+	write := func(v any) {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return
+		}
+		buf.WriteString("data: ")
+		buf.Write(raw)
+		buf.WriteString("\n\n")
+	}
+	write(map[string]any{
+		"id": doc.ID, "object": "chat.completion.chunk", "created": doc.Created, "model": doc.Model,
+		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": role}, "finish_reason": nil}},
+	})
+	if choice.Message.Content != "" {
+		write(map[string]any{
+			"id": doc.ID, "object": "chat.completion.chunk", "created": doc.Created, "model": doc.Model,
+			"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": choice.Message.Content}, "finish_reason": nil}},
+		})
+	}
+	if len(choice.Message.ToolCalls) > 0 {
+		write(map[string]any{
+			"id": doc.ID, "object": "chat.completion.chunk", "created": doc.Created, "model": doc.Model,
+			"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"tool_calls": choice.Message.ToolCalls}, "finish_reason": nil}},
+		})
+	}
+	finish := choice.FinishReason
+	if finish == "" {
+		finish = "stop"
+	}
+	chunk := map[string]any{
+		"id": doc.ID, "object": "chat.completion.chunk", "created": doc.Created, "model": doc.Model,
+		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}},
+	}
+	if len(doc.Usage) > 0 {
+		chunk["usage"] = doc.Usage
+	}
+	write(chunk)
+	buf.WriteString("data: [DONE]\n\n")
+	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream; charset=utf-8"}}, Body: io.NopCloser(bytes.NewReader(buf.Bytes()))}
 }

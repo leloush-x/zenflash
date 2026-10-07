@@ -1,6 +1,7 @@
 package antigravity
 
 import (
+	"io"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -38,5 +39,21 @@ func TestBuildGenerateRequestSanitizesToolParameters(t *testing.T) {
 	}
 	if !strings.Contains(s, "functionDeclarations") {
 		t.Fatalf("request lost tool declarations: %s", s)
+	}
+}
+
+func TestToStreamResponseEmitsDeltas(t *testing.T) {
+	doc := `{"id":"antigravity-1","object":"chat.completion","created":1,"model":"claude-sonnet-4-6","choices":[{"index":0,"message":{"role":"assistant","content":"hi there"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8}}`
+	resp := ToStreamResponse([]byte(doc))
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, `"object":"chat.completion.chunk"`) {
+		t.Fatalf("stream must use chunk objects: %s", s)
+	}
+	if !strings.Contains(s, `"delta":{"content":"hi there"}`) {
+		t.Fatalf("stream must carry a content delta: %s", s)
+	}
+	if !strings.Contains(s, "data: [DONE]") {
+		t.Fatalf("stream must terminate: %s", s)
 	}
 }
