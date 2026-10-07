@@ -62,6 +62,33 @@ export function sparkline(points: number[], w = 120, h = 28): string {
     .join(" ");
 }
 
+/** Normalize provider-prefixed model IDs to the raw flag key. */
+export const rawModelID = (id: string) => {
+  const value = String(id ?? "");
+  for (const prefix of ["opencode/", "zen/", "cline/", "go/", "codex/", "antigravity/"]) {
+    if (value.startsWith(prefix)) return value.slice(prefix.length);
+  }
+  return value;
+};
+
+/** Display source groups without leaking internal Zen/Go tier names. */
+export const modelSource = (m: any) => {
+  const provider = String(m?.provider ?? "").toLowerCase();
+  const tier = String(m?.tier ?? "").toLowerCase();
+  // An explicit embedded Cline label wins over its internal go-tier marker.
+  if (provider === "cline" || tier === "cline") return "cline";
+  if (["zen", "opencode", "go"].includes(provider) || ["zen", "go"].includes(tier)) return "opencode";
+  if (provider === "antigravity" || tier === "antigravity") return "antigravity";
+  if (provider === "codex" || tier === "codex") return "codex";
+  return provider || tier || "other";
+};
+
+export const sourceLabel = (source: string) =>
+  source === "opencode" ? "OpenCode" : source === "cline" ? "Cline" : source === "antigravity" ? "Antigravity" : source === "codex" ? "Codex" : source === "other" ? "Other" : source;
+
+/** Keep group headers short while preserving the exact API ID in values. */
+export const shortModelID = (id: string) => String(id ?? "").replace(/^(opencode|zen|cline|go|codex|antigravity)\//, "");
+
 /** ConfigView -> ConfigUpdate: secrets stay referenced by fingerprint id. */
 export function configToUpdate(v: any) {
   const secrets = (arr: any[]) => (arr ?? []).map((s) => (s.value ? { value: s.value } : { id: s.id }));
