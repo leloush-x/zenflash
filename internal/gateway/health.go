@@ -314,5 +314,12 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Working-only view: ?working=1 live-probes each entry through the
+	// production inference path and keeps entries that answer 2xx. Opt-in
+	// and slower (one tiny reply per model); the default listing is
+	// untouched and the response shape is identical, only shorter.
+	if r != nil && (r.URL.Query().Get("working") == "1" || r.URL.Query().Get("working") == "true") {
+		data = g.filterWorkingModels(r, data)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }

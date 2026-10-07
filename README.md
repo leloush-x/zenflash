@@ -491,7 +491,7 @@ Postgres with file fallback, memory serving, async stats.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/v1/models` | Models that can be routed with the current configuration. |
+| GET | `/v1/models` | Models that can be routed with the current configuration. `?working=1` keeps only models that answer a live probe. |
 | POST | `/v1/chat/completions` | Chat Completions. |
 | POST | `/v1/responses` | Responses. |
 | POST | `/v1/messages` | Anthropic Messages. |
@@ -509,3 +509,10 @@ Provider pins: when the same raw ID exists on both OpenCode (zen) and Cline
 `opencode/<id>` and `cline/<id>`. Either prefixed ID is accepted on all
 inference routes and pins that provider (`zen/`, `go/`, `codex/`,
 `antigravity/` aliases also work).
+
+Working-only listing: `GET /v1/models?working=1` sends each listed ID one
+tiny reply through the normal inference path and returns only the entries
+that answer `2xx`. It is slower (one short reply per model, 8 at a time,
+30s cap each), opt-in, and changes nothing about the default listing or the
+response shape. Probes run under a diagnostic context, so they never cool
+keys, burn metrics, or reshape traffic.

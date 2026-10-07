@@ -36,6 +36,7 @@
 
 ## Behavior diff
 - Intended fix (authorized 2026-10-06): colliding raw IDs now list `opencode/<id>` + `cline/<id>` aliases alongside the bare ID; prefixed IDs pin tiers on all inference routes (`zen/`, `go/`, `codex/`, `antigravity/` aliases included). Bare IDs, routes, formats, errors, auth unchanged.
+- Additive `?working=1` on `GET /v1/models` (authorized 2026-10-07): live-probes each entry, returns only 2xx answers; default listing, shape, and auth unchanged.
 - Otherwise none. Routes, request/response/streaming formats, error shapes, auth header handling, env/flag names, Docker/CI build preserved. Routes, request/response/streaming formats, error shapes, auth header handling, env/flag names, Docker/CI build all preserved. With `DATABASE_URL` empty, code paths fall back to file/memory exactly (nil store). With DB set, responses identical; only durability changes.
 
 ## Decisions
