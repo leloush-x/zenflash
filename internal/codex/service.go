@@ -41,6 +41,28 @@ func SetServiceStore(s *store.Store) {
 	serviceStore = s
 }
 
+// modelDeprecated reports an admin kill-switch state without a DB read at
+// request time; the shared store refreshes the flag set in memory.
+func modelDeprecated(id string) bool {
+	if serviceStore == nil {
+		return false
+	}
+	raw := id
+	for _, prefix := range []string{"opencode/", "zen/", "cline/", "go/", "codex/", "antigravity/"} {
+		if strings.HasPrefix(raw, prefix) {
+			raw = strings.TrimPrefix(raw, prefix)
+			break
+		}
+	}
+	return serviceStore.Deprecated(raw)
+}
+
+// DeprecatedModel reports whether service-backed Codex model requests are
+// disabled by the shared admin model switch.
+func (s *Service) DeprecatedModel(id string) bool {
+	return modelDeprecated(id)
+}
+
 // serviceAccountID keys one linked account row; stable across refreshes.
 func serviceAccountID(a account, i int) string {
 	if a.ID != "" {

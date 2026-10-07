@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -110,6 +111,16 @@ func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
 	model := jsonutil.StringAt(payload, "model")
 	if model == "" {
 		writeAdminError(w, http.StatusBadRequest, "invalid_request", "request.model is required")
+		return
+	}
+	if raw, _, ok := modelcatalog.SplitTierPrefix(model); ok {
+		model = raw
+	}
+	a.mu.Lock()
+	durable := a.durable
+	a.mu.Unlock()
+	if durable != nil && durable.Deprecated(model) {
+		writeAdminError(w, http.StatusNotFound, "model_deprecated", "model is deprecated and disabled")
 		return
 	}
 	if input.Key.Mode == "" {
@@ -368,6 +379,9 @@ func (a *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				entry := map[string]any{"id": m.ID, "object": "model", "owned_by": m.OwnedBy, "display_name": m.DisplayName, "source": "codex-account", "provider": "codex", "route_protocol": "responses"}
+				if a.codex.DeprecatedModel(m.ID) {
+					entry["deprecated"] = true
+				}
 				if i, exists := indices[m.ID]; exists {
 					data[i] = entry
 				} else {
@@ -375,6 +389,11 @@ func (a *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 					data = append(data, entry)
 				}
 			}
+			sort.SliceStable(data, func(i, j int) bool {
+				a, _ := data[i].(map[string]any)["deprecated"].(bool)
+				b, _ := data[j].(map[string]any)["deprecated"].(bool)
+				return !a && b
+			})
 			listing["data"] = data
 			if body, err := json.Marshal(listing); err == nil {
 				w.Header().Set("Content-Type", "application/json")

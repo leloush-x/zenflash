@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"time"
 
 	"strings"
@@ -38,6 +39,9 @@ func (s *Service) WrapAPI(base http.Handler, keys func() []string) http.Handler 
 		}
 		for _, model := range s.Models() {
 			entry := map[string]any{"id": model.ID, "object": "model", "created": time.Now().Unix(), "owned_by": model.OwnedBy, "display_name": model.DisplayName, "source": "codex-account", "provider": "codex", "route_protocol": "responses"}
+			if s.DeprecatedModel(model.ID) {
+				entry["deprecated"] = true
+			}
 			if i, exists := indices[model.ID]; exists {
 				data[i] = entry
 			} else {
@@ -45,6 +49,12 @@ func (s *Service) WrapAPI(base http.Handler, keys func() []string) http.Handler 
 				data = append(data, entry)
 			}
 		}
+		// Keep admin-disabled models at the end without disturbing stable order.
+		sort.SliceStable(data, func(i, j int) bool {
+			a, _ := data[i].(map[string]any)["deprecated"].(bool)
+			b, _ := data[j].(map[string]any)["deprecated"].(bool)
+			return !a && b
+		})
 		listing["data"] = data
 		body, err := json.Marshal(listing)
 		if err != nil {
@@ -69,7 +79,9 @@ func (s *Service) WrapAPI(base http.Handler, keys func() []string) http.Handler 
 				return
 			}
 			model, _ := payload["model"].(string)
-			if !s.HasModel(model) {
+			// Unknown and admin-disabled models both fall through to the base
+			// gateway, whose shared flag check returns the stable public error.
+			if !s.HasModel(model) || s.DeprecatedModel(model) {
 				r.Body = io.NopCloser(strings.NewReader(string(body)))
 				base.ServeHTTP(w, r)
 				return

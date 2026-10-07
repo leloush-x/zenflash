@@ -195,6 +195,24 @@ func (g *Gateway) SetKeyStore(s *store.Store) {
 	}
 }
 
+// Deprecated reports whether an admin switched a raw model ID off. Nil store
+// (no DATABASE_URL) means nothing is deprecated.
+func (g *Gateway) Deprecated(rawID string) bool {
+	if g == nil || g.keyStore == nil || rawID == "" {
+		return false
+	}
+	return g.keyStore.Deprecated(rawID)
+}
+
+// rawModelID strips any provider prefix so flags stored on the raw ID also
+// match opencode/x and cline/x pinned requests.
+func rawModelID(id string) string {
+	if raw, _, ok := models.SplitTierPrefix(id); ok {
+		return raw
+	}
+	return id
+}
+
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", g.authenticate(g.handleModels))
@@ -275,6 +293,10 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 		}
 		if model == "" {
 			wire.WriteError(w, external, http.StatusBadRequest, "model is required", "invalid_request_error", "model")
+			return
+		}
+		if g.Deprecated(rawModelID(model)) {
+			wire.WriteError(w, external, http.StatusNotFound, "model is deprecated and disabled", "model_deprecated", "model")
 			return
 		}
 		if !g.catalog.SupportedNamespaced(model) {
@@ -452,6 +474,10 @@ func (g *Gateway) handleSystemOne(w http.ResponseWriter, r *http.Request) {
 	}
 	if model == "" {
 		wire.WriteError(w, wire.SystemOne, http.StatusBadRequest, "model is required", "invalid_request_error", "model")
+		return
+	}
+	if g.Deprecated(rawModelID(model)) {
+		wire.WriteError(w, wire.SystemOne, http.StatusNotFound, "model is deprecated and disabled", "model_deprecated", "model")
 		return
 	}
 	if !g.catalog.SupportedNamespaced(model) {

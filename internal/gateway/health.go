@@ -163,6 +163,11 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 	data := make([]map[string]any, 0, len(routes))
 	for _, route := range routes {
 		model := route.ID
+		raw := model
+		if stripped, _, ok := modelcatalog.SplitTierPrefix(model); ok {
+			raw = stripped
+		}
+		deprecated := g.Deprecated(raw)
 		// Tier-scoped metadata: the advertised context window must match
 		// the tier that will serve the request (anonymous ⇒ Zen).
 		md := g.catalog.MetadataForTier(model, route.Tier)
@@ -197,6 +202,9 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 		entry := map[string]any{
 			"id": model, "object": "model", "created": now, "owned_by": "opencode",
 			"metadata": mdMap,
+		}
+		if deprecated {
+			entry["deprecated"] = true
 		}
 		entry["provider"] = opencode.ProviderLabel(route.Tier, g.cfg.Upstream.Go)
 		entry["route_protocol"] = route.Protocol
@@ -275,6 +283,9 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 					"id": opencode.AliasID(aliasTier, model), "object": "model", "created": now, "owned_by": "opencode",
 					"metadata": amdMap,
 				}
+				if deprecated {
+					alias["deprecated"] = true
+				}
 				if aliasTier == config.TierZen {
 					alias["provider"] = "opencode"
 				} else {
@@ -308,10 +319,23 @@ func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Deprecated entries stay visible but sink to the bottom so clients and
+	// the dashboard stop surfacing them first. Separate backing arrays keep
+	// the stable active/deprecated partition from overwriting itself.
+	kept := make([]map[string]any, 0, len(data))
+	pinned := make([]map[string]any, 0, len(data))
+	for _, entry := range data {
+		if entry["deprecated"] == true {
+			pinned = append(pinned, entry)
+		} else {
+			kept = append(kept, entry)
+		}
+	}
+	data = append(kept, pinned...)
 	// Working-only view: ?working=1 live-probes each entry through the
 	// production inference path and keeps entries that answer 2xx. Opt-in
-	// and slower (one tiny reply per model); the default listing is
-	// untouched and the response shape is identical, only shorter.
+	// and slower (one tiny reply per model); disabled models are removed
+	// before probing, and the default listing shape is unchanged.
 	if r != nil && (r.URL.Query().Get("working") == "1" || r.URL.Query().Get("working") == "true") {
 		data = g.filterWorkingModels(r, data)
 	}
