@@ -149,30 +149,45 @@ func getFreeModels() []*ModelInfo {
 	return out
 }
 
-type recommendedPayload struct {
-	Free []struct {
-		ID          string   `json:"id"`
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		Tags        []string `json:"tags"`
-	} `json:"free"`
+type recommendedFreeModel struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
 }
 
-func syncRecommendedModels() (int, error) {
-	initModelsCache()
+type recommendedPayload struct {
+	Free []recommendedFreeModel `json:"free"`
+}
 
-	acc := pickAccount()
-	if acc == nil {
-		return 0, fmt.Errorf("no active accounts")
+// activeAccountSnapshot returns every active pool account without rotating
+// the serving strategy. Free entitlements can differ per account
+// (subscription vs plain free tier), so the sync must ask all of them.
+func activeAccountSnapshot() []*Account {
+	p := loadPool()
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	var out []*Account
+	for _, a := range p.Accounts {
+		if a == nil {
+			continue
+		}
+		if a.Status == "cooldown" && !a.CooldownUntil.IsZero() && time.Now().After(a.CooldownUntil) {
+			a.Status = "active"
+			a.CooldownUntil = time.Time{}
+			a.LastReason = ""
+		}
+		if a.Status == "active" {
+			out = append(out, a)
+		}
 	}
-	token, err := ensureAccountToken(acc)
-	if err != nil {
-		return 0, err
-	}
+	return out
+}
 
+func fetchRecommendedFree(token string) ([]recommendedFreeModel, error) {
 	req, err := http.NewRequest("GET", recommendedModelsURL, nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	req.Header = clineHeaders(token, "")
 	req.Header.Set("X-Task-ID", fmt.Sprintf("sess_sync_%d", time.Now().UnixMilli()))
@@ -180,63 +195,100 @@ func syncRecommendedModels() (int, error) {
 	client := &http.Client{Timeout: modelsSyncTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	var payload recommendedPayload
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return 0, err
+		return nil, err
 	}
+	return payload.Free, nil
+}
 
+// syncRecommendedModels unions the free lists of ALL active accounts. The
+// old code asked only the strategy-picked account, hiding subscription free
+// models (MiMo-V2.6-Flash, Muse Spark, DeepSeek V4 Pro, ...) that live on
+// the other accounts.
+func syncRecommendedModels() (int, error) {
+	initModelsCache()
+
+	accounts := activeAccountSnapshot()
+	if len(accounts) == 0 {
+		return 0, fmt.Errorf("no active accounts")
+	}
 	modelsMu.Lock()
 	defer modelsMu.Unlock()
 
 	added := 0
-	for _, m := range payload.Free {
-		id := m.ID
-		provider := id
-		if i := indexByte(id, '/'); i >= 0 {
-			provider = id[:i]
-		}
-		if cached, ok := modelsCache[id]; ok {
-			cached.Source = "free"
-			cached.Cost = "free"
-			cached.Provider = provider
-			cached.Status = ModelActive
-			cached.SyncedAt = time.Now()
-			if cached.Name == "" {
-				cached.Name = m.Name
-			}
-			if cached.Description == "" {
-				cached.Description = m.Description
-			}
-			if len(cached.Tags) == 0 && len(m.Tags) > 0 {
-				cached.Tags = append([]string(nil), m.Tags...)
-			}
+	for _, acc := range accounts {
+		token, err := ensureAccountToken(acc)
+		if err != nil {
+			log.Printf("  model sync: account %s token failed (%v)", acc.Email, err)
 			continue
 		}
-		modelsCache[id] = &ModelInfo{
-			ID:             id,
-			Name:           m.Name,
-			Description:    m.Description,
-			Tags:           append([]string(nil), m.Tags...),
-			Source:         "free",
-			Provider:       provider,
-			Cost:           "free",
-			Status:         ModelActive,
-			RequiresStream: indexByte(id, ':') < 0,
-			SyncedAt:       time.Now(),
+		free, err := fetchRecommendedFree(token)
+		if err != nil {
+			log.Printf("  model sync: account %s recommended feed failed (%v)", acc.Email, err)
+			continue
 		}
-		added++
+		for _, m := range free {
+			if mergeRecommendedFree(m) {
+				added++
+			}
+		}
+		log.Printf("  model sync: account %s lists %d free models", acc.Email, len(free))
 	}
 
 	modelsLastSync = time.Now()
 	return added, nil
+}
+
+// mergeRecommendedFree folds one recommended entry into the cache.
+// Reports true when the id is newly added. Caller holds modelsMu.
+func mergeRecommendedFree(m recommendedFreeModel) bool {
+	id := strings.TrimSpace(m.ID)
+	if id == "" {
+		return false
+	}
+	provider := id
+	if i := indexByte(id, '/'); i >= 0 {
+		provider = id[:i]
+	}
+	if cached, ok := modelsCache[id]; ok {
+		cached.Source = "free"
+		cached.Cost = "free"
+		cached.Provider = provider
+		cached.Status = ModelActive
+		cached.SyncedAt = time.Now()
+		if cached.Name == "" {
+			cached.Name = m.Name
+		}
+		if cached.Description == "" {
+			cached.Description = m.Description
+		}
+		if len(cached.Tags) == 0 && len(m.Tags) > 0 {
+			cached.Tags = append([]string(nil), m.Tags...)
+		}
+		return false
+	}
+	modelsCache[id] = &ModelInfo{
+		ID:             id,
+		Name:           m.Name,
+		Description:    m.Description,
+		Tags:           append([]string(nil), m.Tags...),
+		Source:         "free",
+		Provider:       provider,
+		Cost:           "free",
+		Status:         ModelActive,
+		RequiresStream: indexByte(id, ':') < 0,
+		SyncedAt:       time.Now(),
+	}
+	return true
 }
 
 // syncPublicModels merges the unauthenticated public model list into the
