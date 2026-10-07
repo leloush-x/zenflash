@@ -632,13 +632,10 @@ type quotaResp struct {
 	} `json:"models"`
 }
 
-// DefaultModels is the safe fallback before the first quota sync.
+// DefaultModels reports no hardcoded fallback: the model list comes only
+// from the upstream quota sync. Callers treat empty as "sync pending".
 func DefaultModels() []string {
-	return []string{
-		"gemini-3.6-flash-low", "gemini-3.6-flash-medium", "gemini-3.6-flash-high",
-		"gemini-3.7-flash-tiered", "gemini-3.8-flash-tiered",
-		"gemini-3.1-pro-low", "gemini-pro-agent", "gpt-oss-120b-medium",
-	}
+	return nil
 }
 
 // ModelQuota is one fetchAvailableModels entry with its quota meter.
@@ -776,7 +773,7 @@ func Sync(ctx context.Context, client *http.Client, cred TokenData) (TokenData, 
 	}
 	models, err := FetchModels(ctx, client, cred.AccessToken, cred.ProjectID)
 	if err != nil {
-		return cred, DefaultModels(), nil
+		return cred, nil, nil
 	}
 	return cred, models, nil
 }
@@ -1168,6 +1165,7 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 		}
 	}
 	text := []string{}
+	thought := []string{}
 	toolCalls := []any{}
 	for _, c := range r.Candidates {
 		if c.Content == nil {
@@ -1175,6 +1173,9 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 		}
 		for _, p := range c.Content.Parts {
 			if p.Thought {
+				if p.Text != "" {
+					thought = append(thought, p.Text)
+				}
 				continue
 			}
 			if p.Text != "" {
@@ -1193,10 +1194,18 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 			}
 		}
 	}
-	msg := map[string]any{"role": "assistant", "content": strings.Join(text, "")}
+	// Thinking-only replies (no visible text, no tool call) decode as an
+	// all-empty Chat turn, which Cline's OpenAI-compatible provider treats
+	// as a hard failure ("Model returned empty response"). Fall back to the
+	// thought text so the turn always carries content.
+	joined := strings.Join(text, "")
+	if joined == "" && len(toolCalls) == 0 && len(thought) > 0 {
+		joined = strings.Join(thought, "")
+	}
+	msg := map[string]any{"role": "assistant", "content": joined}
 	if len(toolCalls) > 0 {
 		msg["tool_calls"] = toolCalls
-		msg["content"] = strings.Join(text, "")
+		msg["content"] = joined
 	}
 	usage := map[string]any{}
 	if r.UsageMetadata != nil {
@@ -1207,7 +1216,7 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 		}
 	}
 	out := map[string]any{
-		"id":     "antigravity-" + hex8(strings.Join(text, "")+model),
+		"id":     "antigravity-" + hex8(joined+model),
 		"object": "chat.completion", "created": time.Now().Unix(), "model": model,
 		"choices": []any{map[string]any{"index": 0, "message": msg, "finish_reason": "stop"}},
 		"usage":   usage,
