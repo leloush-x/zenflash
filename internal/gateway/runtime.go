@@ -369,7 +369,7 @@ func (m *RuntimeManager) DebugModels() ([]modelcatalog.RouteDiagnostic, modelcat
 			hasZen = hasZen || tier == config.TierZen
 			hasGo = hasGo || tier == config.TierGo
 			hasCline = hasCline || tier == config.TierCline
-			}
+		}
 		if (hasZen && hasGo) || (hasZen && hasCline) || (hasGo && hasCline) {
 			for _, tier := range []config.Tier{config.TierZen, config.TierGo, config.TierCline} {
 				if (tier == config.TierZen && !hasZen) || (tier == config.TierGo && !hasGo) || (tier == config.TierCline && !hasCline) {
