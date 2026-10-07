@@ -1202,6 +1202,12 @@ func geminiToChat(body []byte, model string) ([]byte, error) {
 	if joined == "" && len(toolCalls) == 0 && len(thought) > 0 {
 		joined = strings.Join(thought, "")
 	}
+	// A turn with no text and no tool call is a silent empty reply
+	// downstream. Fail loudly instead so the gateway can fail over to the
+	// next account instead of handing clients an empty response.
+	if joined == "" && len(toolCalls) == 0 {
+		return nil, fmt.Errorf("antigravity returned no text for model %s", model)
+	}
 	msg := map[string]any{"role": "assistant", "content": joined}
 	if len(toolCalls) > 0 {
 		msg["tool_calls"] = toolCalls

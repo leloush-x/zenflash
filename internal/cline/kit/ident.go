@@ -56,9 +56,25 @@ func RandIntn(n int) int {
 	return v % n
 }
 
+// zenBase62 is the alphabet for the random tail of a canonical session id.
+const zenBase62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// canonicalZenSession builds a random session id in OpenCode's canonical
+// shape ("ses_" + 12 lowercase hex + 14 Base62). The Zen free tier rejects
+// any other session shape with 403, so rotation must stay canonical: every
+// call still returns a fresh identity, only the format is fixed.
+func canonicalZenSession() string {
+	timePart := RandHex(6)
+	tail := make([]byte, 14)
+	for i := range tail {
+		tail[i] = zenBase62[RandIntn(len(zenBase62))]
+	}
+	return "ses_" + timePart + string(tail)
+}
+
 // FreshZenIdentity 生成一组全新客户端身份 (session, request, user-agent)
 func FreshZenIdentity() (string, string, string) {
-	return "sess_" + RandHex(16),
+	return canonicalZenSession(),
 		"user_" + RandHex(8),
 		ZenUserAgents[RandIntn(len(ZenUserAgents))]
 }
